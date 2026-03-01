@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: intracking
+      POSTGRES_PASSWORD: intracking_dev_password
+      POSTGRES_DB: intracking_crm
+    ports:
+      - "5432:5432"
+  app:
+    image: node:18-alpine
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: intracking
+      DB_PASSWORD: intracking_dev_password
+      DB_NAME: intracking_crm
+      JWT_SECRET: dev_jwt_secret_key_change_in_production
+    depends_on:
+      - postgres
+    command: sh -c "npm install && npm run build && npm start"
+    volumes:
+      - .:/app
