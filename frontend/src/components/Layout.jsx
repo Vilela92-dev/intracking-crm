@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Menu, X, LogOut, BarChart3, Users, ShoppingCart, Home } from 'lucide-react'
+import { Menu, X, LogOut, BarChart3, Users, ShoppingCart, Home, Package } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 export function Layout({ children }) {
@@ -18,6 +18,7 @@ export function Layout({ children }) {
     { path: '/dashboard', label: 'Dashboard', icon: Home },
     { path: '/crm', label: 'Clientes', icon: Users },
     { path: '/vendas', label: 'Vendas', icon: ShoppingCart },
+    { path: '/estoque', label: 'Estoque', icon: Package },
     { path: '/relatorios', label: 'Relatórios', icon: BarChart3 },
   ]
 
@@ -32,57 +33,40 @@ export function Layout({ children }) {
         } bg-white border-r border-secondary-200 transition-all duration-300 flex flex-col`}
       >
         {/* Logo */}
-        <div className="p-4 border-b border-secondary-200">
-          <Link to="/dashboard" className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-primary-600 to-primary-700 rounded-lg flex items-center justify-center">
-              <span className="text-lg font-bold text-white">I</span>
-            </div>
-            {sidebarOpen && (
-              <div>
-                <p className="font-bold text-secondary-900 text-sm">Intracking</p>
-                <p className="text-xs text-secondary-600">CRM</p>
-              </div>
-            )}
-          </Link>
+        <div className="p-4 border-b border-secondary-200 flex items-center gap-3 overflow-hidden">
+          <div className="w-10 h-10 bg-primary-600 rounded-lg flex-shrink-0 flex items-center justify-center">
+            <span className="text-white font-bold text-xl">I</span>
+          </div>
+          {sidebarOpen && (
+            <span className="font-bold text-xl text-secondary-900 truncate">Intracking</span>
+          )}
         </div>
 
-        {/* Menu Items */}
-        <nav className="flex-1 p-4 space-y-2">
-          {menuItems.map((item) => {
-            const Icon = item.icon
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-colors ${
-                  isActive(item.path)
-                    ? 'bg-primary-100 text-primary-600'
-                    : 'text-secondary-700 hover:bg-secondary-100'
-                }`}
-              >
-                <Icon size={20} className="flex-shrink-0" />
-                {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
-              </Link>
-            )
-          })}
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+          {menuItems.map((item) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                isActive(item.path)
+                  ? 'bg-primary-50 text-primary-600'
+                  : 'text-secondary-600 hover:bg-secondary-100'
+              }`}
+            >
+              <item.icon size={20} className="flex-shrink-0" />
+              {sidebarOpen && <span className="font-medium">{item.label}</span>}
+            </Link>
+          ))}
         </nav>
 
-        {/* User Info */}
-        <div className="p-4 border-t border-secondary-200 space-y-3">
-          {sidebarOpen && (
-            <div className="bg-primary-50 rounded-lg p-3">
-              <p className="text-xs text-secondary-600">Usuário</p>
-              <p className="text-sm font-semibold text-secondary-900 truncate">{user?.name}</p>
-              <p className="text-xs text-secondary-600 truncate">{user?.email}</p>
-            </div>
-          )}
+        {/* User Info & Logout */}
+        <div className="p-4 border-t border-secondary-200">
           <button
             onClick={handleLogout}
-            className={`w-full flex items-center gap-2 px-4 py-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors ${
-              !sidebarOpen && 'justify-center'
-            }`}
+            className="w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
           >
-            <LogOut size={18} />
+            <LogOut size={18} className="flex-shrink-0" />
             {sidebarOpen && <span className="text-sm font-medium">Sair</span>}
           </button>
         </div>
@@ -91,12 +75,12 @@ export function Layout({ children }) {
         <div className="p-2 border-t border-secondary-200">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="w-full p-2 hover:bg-secondary-100 rounded-lg transition-colors"
+            className="w-full p-2 hover:bg-secondary-100 rounded-lg transition-colors flex items-center justify-center"
           >
             {sidebarOpen ? (
-              <X size={20} className="mx-auto text-secondary-600" />
+              <X size={20} className="text-secondary-600" />
             ) : (
-              <Menu size={20} className="mx-auto text-secondary-600" />
+              <Menu size={20} className="text-secondary-600" />
             )}
           </button>
         </div>
@@ -104,19 +88,24 @@ export function Layout({ children }) {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
+        {/* Header - CORRIGIDO AQUI */}
         <header className="bg-white border-b border-secondary-200 px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-bold text-secondary-900">Intracking CRM</h1>
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-sm font-medium text-secondary-900">{user?.name}</p>
-              <p className="text-xs text-secondary-600">{user?.role === 'admin' ? 'Administrador' : 'Vendedor'}</p>
+              <p className="text-xs text-secondary-600">
+                {user?.role === 'admin' ? 'Administrador' : 'Utilizador'}
+              </p>
+            </div>
+            <div className="w-10 h-10 bg-secondary-200 rounded-full flex items-center justify-center text-secondary-600 font-bold">
+              {user?.name?.[0]?.toUpperCase()}
             </div>
           </div>
         </header>
 
-        {/* Content */}
-        <main className="flex-1 overflow-auto p-6">
+        {/* Content Area */}
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-secondary-50 p-6">
           {children}
         </main>
       </div>

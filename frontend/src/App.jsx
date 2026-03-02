@@ -8,6 +8,7 @@ import { CRM } from './pages/CRM'
 import { Vendas } from './pages/Vendas'
 import { Relatorios } from './pages/Relatorios'
 import { NotFound } from './pages/NotFound'
+import { Estoque } from './pages/Estoque'
 
 function App() {
   return (
@@ -54,6 +55,18 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <Relatorios />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Rota do Estoque adicionada corretamente */}
+          <Route
+            path="/estoque"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Estoque />
                 </Layout>
               </ProtectedRoute>
             }
