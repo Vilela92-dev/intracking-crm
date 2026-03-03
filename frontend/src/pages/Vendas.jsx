@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
-import { Plus, Search, Trash2, ShoppingCart, Receipt, Loader2, X, CreditCard, AlertTriangle } from 'lucide-react'
+import { useEffect, useState, useCallback, useMemo } from 'react' // Adicionado useMemo
+import { Plus, Search, Trash2, ShoppingCart, Receipt, Loader2, X, CreditCard, AlertTriangle, Scissors } from 'lucide-react'
 import api from '../services/api'
 
 export function Vendas() {
@@ -10,7 +10,8 @@ export function Vendas() {
   const [loading, setLoading] = useState(true)   
   const [showForm, setShowForm] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false) 
-  
+  const [isSobMedida, setIsSobMedida] = useState(false) // NOVO: Controle de filtro
+
   const [formData, setFormData] = useState({
     customerId: '',
     items: [{ productId: '', quantity: 1, price: 0 }],
@@ -19,6 +20,13 @@ export function Vendas() {
     notes: '',
   })
 
+  // --- FILTRO DE PRODUTOS DINÂMICO ---
+  // Só mostra PEÇA_PRONTA por padrão. Se ativar "Sob Medida", mostra tudo.
+  const filteredProducts = useMemo(() => {
+    if (isSobMedida) return products;
+    return products.filter(p => p.category === 'PEÇA_PRONTA');
+  }, [products, isSobMedida]);
+
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('pt-BR', {
       style: 'currency',
@@ -26,7 +34,6 @@ export function Vendas() {
     }).format(value || 0)
   }
 
-  // --- BUSCA DE DADOS (API) ---
   const fetchData = useCallback(async () => {
     try {
       setLoading(true)
@@ -50,7 +57,6 @@ export function Vendas() {
     fetchData()
   }, [fetchData])
 
-  // --- LÓGICA DO FORMULÁRIO ---
   const handleAddItem = () => {
     setFormData({
       ...formData,
@@ -81,7 +87,6 @@ export function Vendas() {
     return formData.items.reduce((sum, item) => sum + (item.quantity * item.price), 0)
   }
 
-  // --- SUBMISSÃO CORRIGIDA PARA O SERVER.JS ---
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!formData.customerId || formData.items.some(i => !i.productId)) {
@@ -93,21 +98,29 @@ export function Vendas() {
       setIsSubmitting(true)
       const customer = customers.find(c => c.id === formData.customerId)
       
-      // Mapeamento de nomes para bater com o Backend (server.js)
       const payload = {
         customerId: formData.customerId,
         customerName: customer?.name || 'Cliente Desconhecido',
         items: formData.items,
         paymentMethod: formData.paymentMethod,
-        totalValue: calculateTotal(), // Nome esperado pelo server
-        numParcelas: formData.paymentMethod === 'CREDIT' ? formData.installments : 0, // Nome esperado pelo server
+        totalValue: calculateTotal(),
+        numParcelas: formData.paymentMethod === 'CREDIT' ? formData.installments : 0,
+        isSobMedida: isSobMedida, // Enviando a flag para o backend
         notes: formData.notes,
         createdAt: new Date().toISOString()
       }
 
-      await api.post('/sales', payload)
+      const response = await api.post('/sales', payload)
+      
+      // VERIFICAÇÃO DE ALERTAS DE ESTOQUE (Vindo do backend)
+      if (response.data.alerts && response.data.alerts.length > 0) {
+        alert("Venda realizada com avisos:\n\n" + response.data.alerts.join('\n'));
+      } else {
+        alert('Venda registrada com sucesso!');
+      }
       
       setShowForm(false)
+      setIsSobMedida(false) // Resetar o modo
       setFormData({
         customerId: '',
         items: [{ productId: '', quantity: 1, price: 0 }],
@@ -116,17 +129,16 @@ export function Vendas() {
         notes: '',
       })
       await fetchData() 
-      alert('Venda registada com sucesso!')
     } catch (error) {
       console.error('Erro ao salvar venda:', error)
-      alert('Erro ao processar venda. Verifique a consola.')
+      alert('Erro ao processar venda. Verifique o estoque disponível ou a conexão.')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const handleDelete = async (id, name, total) => {
-    if (window.confirm(`Deseja cancelar a venda de ${name}?`)) {
+  const handleDelete = async (id, name) => {
+    if (window.confirm(`Deseja cancelar a venda de ${name}? O estoque será estornado.`)) {
       try {
         await api.delete(`/sales/${id}`)
         fetchData()
@@ -157,6 +169,7 @@ export function Vendas() {
         </button>
       </div>
 
+      {/* TABELA DE VENDAS (Mantida conforme original) */}
       <div className="bg-white rounded-xl shadow-sm border border-secondary-200 overflow-hidden">
         <table className="w-full text-left border-collapse">
           <thead className="bg-secondary-50 border-b border-secondary-200">
@@ -171,7 +184,12 @@ export function Vendas() {
           <tbody className="divide-y divide-secondary-100">
             {sales.map((sale) => (
               <tr key={sale.id} className="hover:bg-secondary-50 transition-colors">
-                <td className="px-6 py-4 font-semibold text-secondary-900">{sale.customerName}</td>
+                <td className="px-6 py-4 font-semibold text-secondary-900">
+                    <div className="flex flex-col">
+                        {sale.customerName}
+                        {sale.isSobMedida && <span className="text-[10px] text-primary-500 font-bold flex items-center gap-1"><Scissors size={10}/> SOB MEDIDA</span>}
+                    </div>
+                </td>
                 <td className="px-6 py-4 text-sm text-secondary-500">{new Date(sale.createdAt).toLocaleDateString('pt-BR')}</td>
                 <td className="px-6 py-4">
                   <span className="px-2 py-1 bg-secondary-100 text-secondary-600 rounded text-[10px] font-bold uppercase">
@@ -180,7 +198,7 @@ export function Vendas() {
                 </td>
                 <td className="px-6 py-4 text-right font-bold text-primary-600">{formatCurrency(sale.totalValue || sale.total)}</td>
                 <td className="px-6 py-4 text-center">
-                  <button onClick={() => handleDelete(sale.id, sale.customerName, sale.totalValue)} className="p-2 text-secondary-400 hover:text-red-600 rounded-lg transition-all">
+                  <button onClick={() => handleDelete(sale.id, sale.customerName)} className="p-2 text-secondary-400 hover:text-red-600 rounded-lg transition-all">
                     <Trash2 size={18}/>
                   </button>
                 </td>
@@ -199,6 +217,25 @@ export function Vendas() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto">
+              
+              {/* NOVO: SELETOR SOB MEDIDA */}
+              <div className="flex items-center justify-between p-4 bg-primary-50 rounded-xl border border-primary-100">
+                <div className="flex items-center gap-3">
+                    <Scissors className="text-primary-600" size={24} />
+                    <div>
+                        <p className="text-sm font-bold text-primary-900">Encomenda Sob Medida?</p>
+                        <p className="text-[11px] text-primary-600">Ative para selecionar tecidos e insumos</p>
+                    </div>
+                </div>
+                <button 
+                    type="button"
+                    onClick={() => setIsSobMedida(!isSobMedida)}
+                    className={`w-12 h-6 rounded-full transition-colors relative ${isSobMedida ? 'bg-primary-600' : 'bg-secondary-300'}`}
+                >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isSobMedida ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+
               <div>
                 <label className="block text-sm font-bold text-secondary-700 mb-2">Cliente</label>
                 <select required className="w-full px-4 py-2.5 border border-secondary-200 rounded-xl bg-white" value={formData.customerId} onChange={(e) => setFormData({ ...formData, customerId: e.target.value })}>
@@ -209,7 +246,7 @@ export function Vendas() {
 
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <label className="text-sm font-bold text-secondary-700">Produtos</label>
+                  <label className="text-sm font-bold text-secondary-700">Produtos {!isSobMedida && "(Peças Prontas)"}</label>
                   <button type="button" onClick={handleAddItem} className="text-primary-600 text-sm font-bold">+ Adicionar Item</button>
                 </div>
                 {formData.items.map((item, index) => (
@@ -217,7 +254,11 @@ export function Vendas() {
                     <div className="col-span-6">
                       <select required className="w-full px-3 py-2 border rounded-lg text-sm bg-white" value={item.productId} onChange={(e) => handleItemChange(index, 'productId', e.target.value)}>
                         <option value="">Selecione...</option>
-                        {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock})</option>)}
+                        {filteredProducts.map(p => (
+                            <option key={p.id} value={p.id}>
+                                [{p.category.replace('_', ' ')}] {p.name} (Stock: {p.stock} {p.unit})
+                            </option>
+                        ))}
                       </select>
                     </div>
                     <div className="col-span-2">

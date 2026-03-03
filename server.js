@@ -56,41 +56,47 @@ app.delete('/api/v1/suppliers/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// === ESTOQUE (PRODUTOS) ===
+// === ESTOQUE (PRODUTOS) E CONTAS A PAGAR ===
 app.get('/api/v1/products', (req, res) => res.json({ data: products }));
 
 app.post('/api/v1/products', (req, res) => {
-  const { name, category, price, stock, supplierId, supplierName, bills: parcelas } = req.body;
-  
-  // Criamos um ID único para este lote de compra para facilitar a exclusão depois
-  const purchaseGroupId = 'purchase-' + Date.now();
-  
-  const novoProduto = { 
-    id: 'prod-' + Date.now(), 
-    purchaseGroupId, // Link entre o produto e seus boletos
-    name, category, 
-    price: parseFloat(price) || 0, 
-    stock: parseFloat(stock) || 0, 
-    supplierId, supplierName,
-    createdAt: new Date()
-  };
-  products.push(novoProduto);
+  try {
+    const { name, category, price, stock, supplierId, supplierName, bills: parcelas } = req.body;
+    const purchaseGroupId = 'purchase-' + Date.now();
+    
+    const novoProduto = { 
+      id: 'prod-' + Date.now(), 
+      purchaseGroupId,
+      name, category, 
+      price: parseFloat(price) || 0, 
+      stock: parseFloat(stock) || 0, 
+      supplierId, supplierName,
+      createdAt: new Date()
+    };
+    
+    products.push(novoProduto);
 
-  if (parcelas && parcelas.length > 0) {
-    parcelas.forEach(p => {
-      bills.push({
-        id: `bill-supp-${Date.now()}-${p.installment}`,
-        purchaseGroupId, // Marcamos o boleto com o ID da compra
-        description: `Compra: ${name} (${p.installment}ª parc)`,
-        value: parseFloat(p.value) || 0,
-        type: 'despesa',
-        status: 'PENDENTE',
-        dueDate: p.dueDate,
-        createdAt: new Date()
+    // Geração das contas a pagar (Despesas)
+    if (parcelas && Array.isArray(parcelas)) {
+      parcelas.forEach((p, index) => {
+        bills.push({
+          id: `bill-supp-${Date.now()}-${index}`,
+          purchaseGroupId,
+          description: `Compra: ${name} (Parc ${index + 1}/${parcelas.length})`,
+          value: parseFloat(p.value) || 0,
+          type: 'despesa',
+          status: 'PENDENTE',
+          dueDate: p.dueDate,
+          createdAt: new Date()
+        });
       });
-    });
+    }
+
+    res.json({ data: novoProduto });
+  } catch (err) {
+    console.error("Erro na entrada de produto:", err);
+    res.status(500).json({ error: "Erro ao processar entrada de produto" });
   }
-  res.json({ data: novoProduto });
 });
 
 app.put('/api/v1/products/:id', (req, res) => {
@@ -110,17 +116,14 @@ app.put('/api/v1/products/:id', (req, res) => {
   }
 });
 
-// DELETE ATUALIZADO: Remove o produto E as contas a pagar vinculadas
 app.delete('/api/v1/products/:id', (req, res) => {
   const { id } = req.params;
   const productToDelete = products.find(p => p.id === id);
   
   if (productToDelete) {
-    // 1. Remove os boletos vinculados a essa entrada de estoque
     if (productToDelete.purchaseGroupId) {
         bills = bills.filter(b => b.purchaseGroupId !== productToDelete.purchaseGroupId);
     }
-    // 2. Remove o produto
     products = products.filter(p => p.id !== id);
     res.json({ success: true, message: 'Produto e boletos removidos' });
   } else {
@@ -128,67 +131,73 @@ app.delete('/api/v1/products/:id', (req, res) => {
   }
 });
 
-// === VENDAS (COM ATUALIZAÇÃO DO FINANCEIRO) ===
+// === VENDAS (BAIXA ESTOQUE + FINANCEIRO) ===
 app.get('/api/v1/sales', (req, res) => res.json({ data: sales }));
 
 app.post('/api/v1/sales', (req, res) => {
-  const { 
-    customerId, 
-    customerName, 
-    items, 
-    totalValue, 
-    paymentMethod, 
-    numParcelas 
-  } = req.body;
+  try {
+    const { customerId, customerName, items, totalValue, paymentMethod, numParcelas } = req.body;
 
-  const novaVenda = { 
-    id: 'sale-' + Date.now(), 
-    customerId, 
-    customerName, 
-    items, 
-    totalValue: parseFloat(totalValue) || 0, 
-    paymentMethod,
-    createdAt: new Date()
-  };
-  
-  sales.push(novaVenda);
+    // 1. BAIXA DE ESTOQUE
+    if (items && Array.isArray(items)) {
+      items.forEach(itemVendido => {
+        const produtoNoEstoque = products.find(p => p.id === itemVendido.productId);
+        if (produtoNoEstoque) {
+          const estoqueAtual = parseFloat(produtoNoEstoque.stock) || 0;
+          const qtdVendida = parseFloat(itemVendido.quantity) || 0;
+          produtoNoEstoque.stock = estoqueAtual - qtdVendida;
+        }
+      });
+    }
 
-  // Lógica para gerar boletos no financeiro (Contas a Receber)
-  // Verifica se é parcelado ou se o método exige lançamento financeiro
-  const quantidadeParcelas = parseInt(numParcelas) || 0;
+    // 2. REGISTRO DA VENDA
+    const novaVenda = { 
+      id: 'sale-' + Date.now(), 
+      customerId, customerName, items, 
+      totalValue: parseFloat(totalValue) || 0, 
+      paymentMethod,
+      createdAt: new Date()
+    };
+    sales.push(novaVenda);
 
-  if (quantidadeParcelas > 0) {
+    // 3. ATUALIZAÇÃO FINANCEIRA
+    const qtdParcelas = parseInt(numParcelas) || 0;
     const valorTotalNum = parseFloat(totalValue) || 0;
-    const valorParcela = (valorTotalNum / quantidadeParcelas).toFixed(2);
 
-    for (let i = 1; i <= quantidadeParcelas; i++) {
-      const dataVencimento = new Date();
-      dataVencimento.setMonth(dataVencimento.getMonth() + i); // Vencimentos mensais
+    if (qtdParcelas > 1) {
+      const valorParcela = parseFloat((valorTotalNum / qtdParcelas).toFixed(2));
+      for (let i = 1; i <= qtdParcelas; i++) {
+        const dataVencimento = new Date();
+        dataVencimento.setMonth(dataVencimento.getMonth() + i);
 
+        bills.push({
+          id: `rev-inst-${Date.now()}-${i}`,
+          description: `Venda: ${customerName} (Parc ${i}/${qtdParcelas})`,
+          value: valorParcela,
+          type: 'receita',
+          status: 'PENDENTE',
+          dueDate: dataVencimento.toISOString().split('T')[0],
+          createdAt: new Date()
+        });
+      }
+    } else {
+      // Venda à vista ou 1x
       bills.push({
-        id: `rev-inst-${Date.now()}-${i}`,
-        description: `Venda: ${customerName} (Parc ${i}/${quantidadeParcelas})`,
-        value: parseFloat(valorParcela), // Garante que seja número para evitar o NaN
-        type: 'receita', // Importante para o cálculo de lucro
-        status: 'PENDENTE',
-        dueDate: dataVencimento.toISOString().split('T')[0],
+        id: `rev-cash-${Date.now()}`,
+        description: `Venda à Vista: ${customerName}`,
+        value: valorTotalNum,
+        type: 'receita',
+        status: (paymentMethod === 'CREDIT') ? 'PENDENTE' : 'PAGO',
+        dueDate: new Date().toISOString().split('T')[0],
         createdAt: new Date()
       });
     }
-  } else if (paymentMethod === 'PIX' || paymentMethod === 'DINHEIRO') {
-    // Se for à vista, opcionalmente lança um boleto já PAGO no financeiro
-    bills.push({
-      id: `rev-cash-${Date.now()}`,
-      description: `Venda à Vista: ${customerName}`,
-      value: parseFloat(totalValue) || 0,
-      type: 'receita',
-      status: 'PAGO',
-      dueDate: new Date().toISOString().split('T')[0],
-      createdAt: new Date()
-    });
-  }
 
-  res.json({ data: novaVenda });
+    res.json({ data: novaVenda });
+  } catch (err) {
+    console.error("Erro ao processar venda:", err);
+    res.status(500).json({ error: "Erro interno ao processar venda" });
+  }
 });
 
 // === AGENDAMENTO ===
