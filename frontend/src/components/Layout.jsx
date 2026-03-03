@@ -1,6 +1,18 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Menu, X, LogOut, BarChart3, Users, ShoppingCart, Home, Package } from 'lucide-react'
+import { 
+  Menu, 
+  X, 
+  LogOut, 
+  BarChart3, 
+  Users, 
+  ShoppingCart, 
+  Home, 
+  Package, 
+  Truck, 
+  Landmark, 
+  Calendar 
+} from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 export function Layout({ children }) {
@@ -14,11 +26,15 @@ export function Layout({ children }) {
     navigate('/login')
   }
 
+  // LISTA DE ITENS DO MENU
   const menuItems = [
     { path: '/dashboard', label: 'Dashboard', icon: Home },
     { path: '/crm', label: 'Clientes', icon: Users },
+    { path: '/calendario', label: 'Agenda / Visitas', icon: Calendar },
     { path: '/vendas', label: 'Vendas', icon: ShoppingCart },
     { path: '/estoque', label: 'Estoque', icon: Package },
+    { path: '/fornecedores', label: 'Fornecedores', icon: Truck },
+    { path: '/financeiro', label: 'Financeiro', icon: Landmark },
     { path: '/relatorios', label: 'Relatórios', icon: BarChart3 },
   ]
 
@@ -88,7 +104,7 @@ export function Layout({ children }) {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header - CORRIGIDO AQUI */}
+        {/* Header */}
         <header className="bg-white border-b border-secondary-200 px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-bold text-secondary-900">Intracking CRM</h1>
           <div className="flex items-center gap-4">

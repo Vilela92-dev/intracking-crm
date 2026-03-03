@@ -9,70 +9,37 @@ import { Vendas } from './pages/Vendas'
 import { Relatorios } from './pages/Relatorios'
 import { NotFound } from './pages/NotFound'
 import { Estoque } from './pages/Estoque'
+import { Fornecedores } from './pages/Fornecedores'
+import { Financeiro } from './pages/Financeiro'
+import { Calendario } from './pages/Calendario'
 
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* Public Routes */}
           <Route path="/login" element={<Login />} />
 
-          {/* Protected Routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <Dashboard />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/crm"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <CRM />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/vendas"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <Vendas />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/relatorios"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <Relatorios />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
+          <Route path="/crm" element={<ProtectedRoute><Layout><CRM /></Layout></ProtectedRoute>} />
+          <Route path="/vendas" element={<ProtectedRoute><Layout><Vendas /></Layout></ProtectedRoute>} />
           
-          {/* Rota do Estoque adicionada corretamente */}
-          <Route
-            path="/estoque"
+          <Route 
+            path="/calendario" 
             element={
               <ProtectedRoute>
                 <Layout>
-                  <Estoque />
+                  <Calendario />
                 </Layout>
               </ProtectedRoute>
-            }
+            } 
           />
 
-          {/* Redirects */}
+          <Route path="/estoque" element={<ProtectedRoute><Layout><Estoque /></Layout></ProtectedRoute>} />
+          <Route path="/fornecedores" element={<ProtectedRoute><Layout><Fornecedores /></Layout></ProtectedRoute>} />
+          <Route path="/financeiro" element={<ProtectedRoute><Layout><Financeiro /></Layout></ProtectedRoute>} />
+          <Route path="/relatorios" element={<ProtectedRoute><Layout><Relatorios /></Layout></ProtectedRoute>} />
+          
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

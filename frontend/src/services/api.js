@@ -1,38 +1,23 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'
-
 const api = axios.create({
-  baseURL: API_URL,
+  // Use 'localhost' em vez de 127.0.0.1 para testar
+  baseURL: 'http://localhost:3000/api/v1', 
   headers: {
     'Content-Type': 'application/json',
   },
-} )
+})
 
-// Interceptador de Request
+// Adicione este log para vermos no console do navegador para onde o app está olhando
+console.log("API Base URL:", api.defaults.baseURL);
+
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('accessToken')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
+    if (token) config.headers.Authorization = `Bearer ${token}`
     return config
   },
   (error) => Promise.reject(error)
-)
-
-// Interceptador de Response
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken')
-      localStorage.removeItem('user')
-      localStorage.removeItem('companyId')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
-  }
 )
 
 export default api
