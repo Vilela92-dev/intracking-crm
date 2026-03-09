@@ -1,34 +1,26 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { 
-  Landmark, Calendar, AlertCircle, CheckCircle2, Loader2, TrendingUp, 
-  TrendingDown, DollarSign, Wallet, ArrowUpCircle, ArrowDownCircle, 
-  Banknote, Plus, X, Tag
+  Landmark, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Clock, Scale, Trash2, X
 } from 'lucide-react'
 import api from '../services/api'
 
-// Configuração de Categorias focada em Despesas do Ateliê
-const CATEGORIES = [
-  { id: 'FIXA', label: 'Custo Fixo (Aluguel/Luz/Água)', color: 'bg-purple-100 text-purple-700' },
-  { id: 'OPERACIONAL', label: 'Operacional (Materiais/Insumos)', color: 'bg-blue-100 text-blue-700' },
-  { id: 'MARKETING', label: 'Marketing e Divulgação', color: 'bg-pink-100 text-pink-700' },
-  { id: 'PESSOAL', label: 'Pró-labore e Equipe', color: 'bg-amber-100 text-amber-700' },
-  { id: 'OUTROS', label: 'Outras Despesas', color: 'bg-secondary-100 text-secondary-700' },
-]
+// Utilitário para garantir comparação de datas sem erro de fuso horário
+const toDateString = (date) => {
+  const d = new Date(date);
+  return d.toISOString().split('T')[0];
+};
 
 export function Financeiro() {
   const [bills, setBills] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('all')
+  const [viewMode, setViewMode] = useState('month') 
+  const [referenceDate, setReferenceDate] = useState(new Date())
   const [showModal, setShowModal] = useState(false)
+  const [activeTab, setActiveTab] = useState('all')
   
-  // Estado do Formulário: Fixo como 'despesa' para evitar redundância com Vendas
   const [formData, setFormData] = useState({
-    description: '', 
-    value: '', 
-    type: 'despesa', 
-    category: 'FIXA', 
-    dueDate: new Date().toISOString().split('T')[0], 
-    status: 'PENDENTE'
+    description: '', value: '', type: 'despesa', category: 'FIXA', 
+    dueDate: new Date().toISOString().split('T')[0], status: 'PENDENTE'
   })
 
   const fetchFinanceData = useCallback(async () => {
@@ -36,263 +28,293 @@ export function Financeiro() {
       setLoading(true)
       const res = await api.get('/finance/bills')
       const data = res.data.data || res.data || []
-      setBills(data)
-    } catch (err) {
-      console.error("Erro ao carregar financeiro:", err)
-    } finally {
-      setLoading(false)
-    }
+      setBills(Array.isArray(data) ? data : [])
+    } catch (err) { console.error("Erro ao carregar:", err) } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { fetchFinanceData() }, [fetchFinanceData])
 
   const handlePay = async (id) => {
+    if (!window.confirm("Confirmar a liquidação deste valor?")) return;
     try {
       await api.patch(`/finance/bills/${id}/pay`)
-      fetchFinanceData()
-    } catch (err) {
-      alert("Erro ao processar pagamento")
-    }
+      await fetchFinanceData()
+    } catch (err) { alert("Erro ao processar baixa") }
+  }
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Tem certeza que deseja excluir este lançamento?")) return;
+    try {
+      await api.delete(`/finance/bills/${id}`)
+      await fetchFinanceData()
+    } catch (err) { alert("Erro ao excluir registro") }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      await api.post('/finance/bills', formData)
+      const payload = { ...formData, value: Number(formData.value) }
+      await api.post('/finance/bills', payload)
       setShowModal(false)
-      // Reseta o form para o padrão de despesa
       setFormData({ 
         description: '', value: '', type: 'despesa', category: 'FIXA', 
         dueDate: new Date().toISOString().split('T')[0], status: 'PENDENTE' 
       })
       fetchFinanceData()
-    } catch (err) {
-      alert("Erro ao salvar despesa")
-    }
+    } catch (err) { alert("Erro ao salvar") }
   }
 
-  const formatCurrency = (val) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
+  const navigate = (direction) => {
+    const newDate = new Date(referenceDate)
+    if (viewMode === 'day') newDate.setDate(newDate.getDate() + direction)
+    else if (viewMode === 'week') newDate.setDate(newDate.getDate() + (direction * 7))
+    else newDate.setMonth(newDate.getMonth() + direction)
+    setReferenceDate(newDate)
   }
 
-  const financeReport = useMemo(() => {
+  const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
+
+  // --- LÓGICA DE PROJEÇÃO REVISADA (ESTRITAMENTE POR STRING DE DATA) ---
+  const report = useMemo(() => {
+    const todayStr = toDateString(new Date());
+    const refStr = toDateString(referenceDate);
+
+    // Definindo limites para Semana e Mês
+    const startWeek = new Date(referenceDate);
+    const day = startWeek.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    startWeek.setDate(startWeek.getDate() - diff);
+    const endWeek = new Date(startWeek);
+    endWeek.setDate(startWeek.getDate() + 6);
+
+    const startMonthStr = `${refStr.substring(0, 7)}-01`;
+    const endMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
+    const endMonthStr = toDateString(endMonth);
+
     return bills.reduce((acc, b) => {
-      const val = parseFloat(b.value) || 0
+      const bDateStr = b.dueDate.split('T')[0];
+      const val = parseFloat(b.value) || 0;
+
+      // 1. SALDO REAL (Tudo que já foi pago até agora)
       if (b.status === 'PAGO') {
-        if (b.type === 'receita') acc.caixaReal += val
-        else acc.caixaReal -= val
-      } else {
-        if (b.type === 'receita') acc.aReceber += val
-        else acc.aPagar += val
+        acc.saldoRealTotal += (b.type === 'receita' ? val : -val);
       }
+
+      // 2. PENDÊNCIAS ANTERIORES (Atrasados: data < hoje)
+      if (b.status === 'PENDENTE' && bDateStr < todayStr) {
+        acc.pendenciasAnteriores += val;
+      }
+
+      // 3. LOGICA DO PERÍODO SELECIONADO (PARA O DASHBOARD)
+      let isInPeriod = false;
+      if (viewMode === 'day') isInPeriod = bDateStr === refStr;
+      else if (viewMode === 'week') isInPeriod = bDateStr >= toDateString(startWeek) && bDateStr <= toDateString(endWeek);
+      else isInPeriod = bDateStr >= startMonthStr && bDateStr <= endMonthStr;
+
+      if (isInPeriod) {
+        if (b.type === 'receita') {
+          acc.periodoEntrada += val;
+          if (b.status === 'PENDENTE') acc.pendenteNoPeriodo += val;
+        } else {
+          acc.periodoSaida += val;
+          if (b.status === 'PENDENTE') acc.pendenteNoPeriodo -= val;
+        }
+      }
+
+      // 4. PROJEÇÃO FINAL
+      acc.projeçãoFechamento = acc.saldoRealTotal + acc.pendenteNoPeriodo;
+
       return acc
-    }, { caixaReal: 0, aReceber: 0, aPagar: 0 })
-  }, [bills])
+    }, { 
+      saldoRealTotal: 0, periodoEntrada: 0, periodoSaida: 0, 
+      pendenciasAnteriores: 0, pendenteNoPeriodo: 0, projeçãoFechamento: 0 
+    })
+  }, [bills, referenceDate, viewMode])
 
-  const saldoProjetado = financeReport.caixaReal + financeReport.aReceber - financeReport.aPagar
-
+  // --- FILTRO DA TABELA ---
   const filteredBills = useMemo(() => {
-    let list = activeTab === 'all' ? bills : bills.filter(b => b.type === activeTab)
-    return list.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
-  }, [bills, activeTab])
+    const refStr = toDateString(referenceDate);
+    
+    return bills.filter(b => {
+      const bDateStr = b.dueDate.split('T')[0];
+      let isPeriod = false;
+
+      if (viewMode === 'day') {
+        isPeriod = bDateStr === refStr;
+      } else if (viewMode === 'week') {
+        const startWeek = new Date(referenceDate);
+        const day = startWeek.getDay();
+        const diff = day === 0 ? 6 : day - 1;
+        startWeek.setDate(startWeek.getDate() - diff);
+        const endWeek = new Date(startWeek);
+        endWeek.setDate(startWeek.getDate() + 6);
+        isPeriod = bDateStr >= toDateString(startWeek) && bDateStr <= toDateString(endWeek);
+      } else {
+        const startMonthStr = `${refStr.substring(0, 7)}-01`;
+        const endMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
+        isPeriod = bDateStr >= startMonthStr && bDateStr <= toDateString(endMonth);
+      }
+
+      const isTab = activeTab === 'all' ? true : b.type === activeTab;
+      return isPeriod && isTab;
+    }).sort((a,b) => a.dueDate.localeCompare(b.dueDate));
+  }, [bills, referenceDate, viewMode, activeTab])
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-start">
+    <div className="space-y-6 p-4 max-w-7xl mx-auto pb-20">
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-secondary-900 flex items-center gap-2">
-            <Landmark className="text-indigo-600" /> Gestão Financeira
+          <h1 className="text-3xl font-black text-secondary-900 flex items-center gap-2 italic">
+            <Landmark className="text-indigo-600" size={32} /> FINANCEIRO
           </h1>
-          <p className="text-secondary-600">Acompanhe suas receitas de vendas e controle seus gastos fixos.</p>
+          <div className="flex gap-2 mt-3">
+            {['day', 'week', 'month'].map(mode => (
+              <button key={mode} onClick={() => { setViewMode(mode); setReferenceDate(new Date()); }}
+                className={`px-5 py-1.5 rounded-full text-[10px] font-black uppercase transition-all ${viewMode === mode ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white text-secondary-400 border border-secondary-100'}`}>
+                {mode === 'day' ? 'Hoje' : mode === 'week' ? 'Semana' : 'Mês'}
+              </button>
+            ))}
+          </div>
         </div>
-        <button 
-          onClick={() => setShowModal(true)}
-          className="bg-red-500 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-red-600 shadow-lg shadow-red-100 transition-all"
-        >
-          <Plus size={18}/> Nova Despesa
+
+        <div className="flex items-center bg-white border-2 border-secondary-100 rounded-3xl p-1.5 shadow-sm">
+          <button onClick={() => navigate(-1)} className="p-2 text-secondary-400 hover:bg-secondary-50 rounded-xl"><ChevronLeft/></button>
+          <div className="px-6 text-center min-w-[200px]">
+             <p className="text-sm font-black text-secondary-800 uppercase">
+              {viewMode === 'day' ? referenceDate.toLocaleDateString('pt-BR') : 
+               viewMode === 'week' ? `Semana Atual` :
+               referenceDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+          <button onClick={() => navigate(1)} className="p-2 text-secondary-400 hover:bg-secondary-50 rounded-xl"><ChevronRight/></button>
+        </div>
+
+        <button onClick={() => setShowModal(true)} className="bg-red-500 text-white px-6 py-3.5 rounded-2xl font-black text-xs uppercase hover:bg-black transition-all shadow-xl">
+          + Novo Lançamento
         </button>
       </div>
 
-      {/* DASHBOARD DE FLUXO */}
+      {/* DASHBOARD */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-indigo-600 p-6 rounded-2xl shadow-lg shadow-indigo-100 text-white">
-          <div className="flex justify-between items-start mb-2 opacity-80">
-            <p className="text-xs font-bold uppercase tracking-wider">Saldo Atual</p>
-            <Banknote size={20} />
+        <div className="bg-secondary-900 p-6 rounded-[2.5rem] text-white shadow-2xl relative">
+          <p className="text-[10px] font-bold uppercase opacity-60 tracking-widest">Saldo Real (Pago)</p>
+          <h2 className="text-3xl font-black mt-1">{formatCurrency(report.saldoRealTotal)}</h2>
+          <div className="mt-4 flex items-center gap-2 text-[9px] text-emerald-400 font-bold bg-white/10 px-3 py-1.5 rounded-full w-fit">
+            <CheckCircle2 size={12}/> Dinheiro Confirmado
           </div>
-          <h2 className="text-2xl font-black">{formatCurrency(financeReport.caixaReal)}</h2>
-          <p className="text-[10px] mt-2 opacity-70 italic">* Dinheiro líquido disponível</p>
+        </div>
+
+        <div className="bg-indigo-600 p-6 rounded-[2.5rem] text-white shadow-2xl shadow-indigo-100 relative">
+          <div className="absolute right-6 top-6 opacity-20"><Scale size={24}/></div>
+          <p className="text-[10px] font-bold uppercase opacity-80 tracking-widest text-indigo-100">
+            {viewMode === 'day' ? 'Projeção p/ Fim do Dia' : viewMode === 'week' ? 'Projeção p/ Fim da Semana' : 'Projeção p/ Fim do Mês'}
+          </p>
+          <h2 className="text-3xl font-black mt-1">{formatCurrency(report.projeçãoFechamento)}</h2>
+          <p className="text-[10px] text-indigo-200 mt-4 font-bold italic underline decoration-indigo-400 underline-offset-4">Saldo Real + Pendentes</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-[2.5rem] border-2 border-secondary-50 flex flex-col justify-between shadow-sm">
+          <div>
+            <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Entradas do Período</p>
+            <h3 className="text-xl font-black text-secondary-800">{formatCurrency(report.periodoEntrada)}</h3>
+          </div>
+          <div className="pt-4 border-t border-secondary-50 mt-4">
+             <p className="text-[9px] font-black text-red-500 uppercase tracking-widest">Saídas do Período</p>
+             <h3 className="text-xl font-black text-secondary-800">{formatCurrency(report.periodoSaida)}</h3>
+          </div>
+        </div>
+
+        <div className={`p-6 rounded-[2.5rem] border-2 transition-all ${report.pendenciasAnteriores > 0 ? 'bg-amber-50 border-amber-100 animate-pulse' : 'bg-white border-secondary-50 opacity-40'}`}>
+          <div className="flex justify-between">
+            <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Atrasados (Pré-Hoje)</p>
+            <AlertCircle size={18} className="text-amber-500"/>
+          </div>
+          <h2 className="text-3xl font-black text-amber-700 mt-1">{formatCurrency(report.pendenciasAnteriores)}</h2>
+          <p className="text-[10px] text-amber-600 mt-2 font-bold uppercase">Liquide para atualizar</p>
+        </div>
+      </div>
+
+      {/* TABELA */}
+      <div className="bg-white border-2 border-secondary-50 rounded-[3rem] overflow-hidden shadow-xl">
+        <div className="px-10 py-8 border-b border-secondary-100 flex justify-between items-center bg-secondary-50/30">
+          <div className="flex gap-4">
+            {['all', 'receita', 'despesa'].map(t => (
+              <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === t ? 'bg-secondary-900 text-white' : 'text-secondary-400 hover:text-secondary-900'}`}>
+                {t === 'all' ? 'Ver Tudo' : t === 'receita' ? 'Receitas' : 'Despesas'}
+              </button>
+            ))}
+          </div>
         </div>
         
-        <div className="bg-white p-6 rounded-2xl border border-secondary-200 shadow-sm">
-          <div className="flex justify-between items-start mb-2">
-            <p className="text-xs font-bold text-secondary-500 uppercase">A Receber (Vendas)</p>
-            <ArrowUpCircle className="text-emerald-500" size={20} />
-          </div>
-          <h2 className="text-2xl font-black text-emerald-600">{formatCurrency(financeReport.aReceber)}</h2>
-        </div>
-
-        <div className="bg-white p-6 rounded-2xl border border-secondary-200 shadow-sm">
-          <div className="flex justify-between items-start mb-2">
-            <p className="text-xs font-bold text-secondary-500 uppercase">A Pagar (Despesas)</p>
-            <ArrowDownCircle className="text-red-500" size={20} />
-          </div>
-          <h2 className="text-2xl font-black text-red-600">{formatCurrency(financeReport.aPagar)}</h2>
-        </div>
-
-        <div className="bg-secondary-50 p-6 rounded-2xl border border-secondary-200 shadow-sm">
-          <div className="flex justify-between items-start mb-2">
-            <p className="text-xs font-bold text-secondary-500 uppercase">Saldo Projetado</p>
-            <Wallet className="text-secondary-400" size={20} />
-          </div>
-          <h2 className={`text-2xl font-black ${saldoProjetado >= 0 ? 'text-secondary-900' : 'text-orange-600'}`}>
-            {formatCurrency(saldoProjetado)}
-          </h2>
-        </div>
-      </div>
-
-      {/* ABAS DE FILTRO */}
-      <div className="flex border-b border-secondary-200 gap-8">
-        {[
-          { id: 'all', label: 'Visão Geral', icon: <Landmark size={18}/> },
-          { id: 'receita', label: 'Receitas (Vendas)', icon: <TrendingUp size={18}/> },
-          { id: 'despesa', label: 'Despesas (Saídas)', icon: <TrendingDown size={18}/> }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 py-4 px-1 border-b-2 font-bold text-sm transition-all ${
-              activeTab === tab.id 
-              ? 'border-indigo-600 text-indigo-600' 
-              : 'border-transparent text-secondary-500 hover:text-secondary-700'
-            }`}
-          >
-            {tab.icon} {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* LISTAGEM FINANCEIRA */}
-      <div className="bg-white border border-secondary-200 rounded-2xl overflow-hidden shadow-sm">
-        {loading ? (
-          <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-indigo-600" size={40} /></div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-secondary-50 border-b border-secondary-100">
-                <tr>
-                  <th className="px-6 py-4 font-bold text-secondary-500 uppercase">Data</th>
-                  <th className="px-6 py-4 font-bold text-secondary-500 uppercase">Descrição</th>
-                  <th className="px-6 py-4 font-bold text-secondary-500 uppercase">Categoria</th>
-                  <th className="px-6 py-4 font-bold text-secondary-500 uppercase text-right">Valor</th>
-                  <th className="px-6 py-4 font-bold text-secondary-500 uppercase text-center">Ação</th>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-secondary-50/20">
+                <th className="px-10 py-5 text-[10px] font-black text-secondary-400 uppercase tracking-widest">Vencimento</th>
+                <th className="px-10 py-5 text-[10px] font-black text-secondary-400 uppercase tracking-widest">Lançamento</th>
+                <th className="px-10 py-5 text-[10px] font-black text-secondary-400 uppercase tracking-widest text-right">Valor</th>
+                <th className="px-10 py-5 text-[10px] font-black text-secondary-400 uppercase tracking-widest text-center">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-secondary-50">
+              {filteredBills.map(bill => (
+                <tr key={bill.id} className="hover:bg-secondary-50/50 transition-colors">
+                  <td className="px-10 py-6 font-black text-xs text-secondary-900 uppercase">
+                    {new Date(bill.dueDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}
+                  </td>
+                  <td className="px-10 py-6">
+                    <p className="text-xs font-black text-secondary-800 uppercase mb-1">{bill.description}</p>
+                    <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase">{bill.category}</span>
+                  </td>
+                  <td className={`px-10 py-6 text-right font-black text-sm ${bill.type === 'receita' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {bill.type === 'receita' ? '+ ' : '- '} {formatCurrency(bill.value)}
+                  </td>
+                  <td className="px-10 py-6 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      {bill.status === 'PENDENTE' ? (
+                        <button onClick={() => handlePay(bill.id)} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-black transition-all">
+                          Liquidar
+                        </button>
+                      ) : (
+                        <div className="text-emerald-600 font-black text-[9px] uppercase bg-emerald-50 py-2 px-4 rounded-full">Confirmado</div>
+                      )}
+                      <button onClick={() => handleDelete(bill.id)} className="p-2 text-secondary-300 hover:text-red-500 transition-all">
+                        <Trash2 size={16}/>
+                      </button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-secondary-100">
-                {filteredBills.map((bill) => {
-                  const catStyle = CATEGORIES.find(c => c.id === bill.category) || { color: 'bg-secondary-100 text-secondary-600', label: 'Venda/Serviço' }
-                  return (
-                    <tr key={bill.id} className={`hover:bg-secondary-50 transition-colors ${bill.status === 'PAGO' ? 'opacity-60' : ''}`}>
-                      <td className="px-6 py-4 font-medium text-secondary-900">
-                        {new Date(bill.dueDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-secondary-800">{bill.description}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${catStyle.color}`}>
-                          {bill.category || 'SERVIÇO'}
-                        </span>
-                      </td>
-                      <td className={`px-6 py-4 text-right font-black ${bill.type === 'receita' ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {bill.type === 'receita' ? '+ ' : '- '} {formatCurrency(bill.value)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex justify-center">
-                          {bill.status === 'PENDENTE' ? (
-                            <button 
-                              onClick={() => handlePay(bill.id)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-secondary-600 border border-secondary-200 rounded-lg text-xs font-bold hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-all"
-                            >
-                              <CheckCircle2 size={14}/> Baixar
-                            </button>
-                          ) : (
-                            <span className="flex items-center gap-1 text-emerald-600 font-bold text-xs uppercase bg-emerald-50 px-2 py-1 rounded-md">
-                              PAGO
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+              ))}
+            </tbody>
+          </table>
+          {filteredBills.length === 0 && <div className="p-20 text-center text-secondary-300 font-bold italic uppercase tracking-widest text-xs">Sem lançamentos para este período.</div>}
+        </div>
       </div>
 
-      {/* MODAL: APENAS NOVA DESPESA */}
+      {/* MODAL */}
       {showModal && (
-        <div className="fixed inset-0 bg-secondary-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 flex justify-between items-center border-b bg-red-50/30">
-              <div>
-                <h2 className="text-xl font-black text-secondary-900 flex items-center gap-2">
-                  <TrendingDown className="text-red-500" /> Lançar Despesa
-                </h2>
-                <p className="text-xs text-secondary-500 font-medium uppercase tracking-widest">Saída de Caixa Manual</p>
-              </div>
-              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-secondary-100 rounded-full transition-all"><X size={20}/></button>
+        <div className="fixed inset-0 bg-secondary-900/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[4rem] w-full max-w-lg shadow-2xl p-12 relative">
+            <button onClick={() => setShowModal(false)} className="absolute top-10 right-10 text-secondary-300 hover:text-black"><X size={30}/></button>
+            <div className="mb-10 text-center">
+               <h2 className="text-3xl font-black text-secondary-900 uppercase italic">Novo Registro</h2>
+               <div className="h-1 w-20 bg-indigo-600 mx-auto mt-2 rounded-full"></div>
             </div>
-
-            <form onSubmit={handleSubmit} className="p-8 space-y-5">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">O que você pagou?</label>
-                <input required autoFocus className="w-full p-4 border rounded-2xl outline-none focus:border-red-500 transition-all text-sm font-medium" 
-                  placeholder="Ex: Aluguel Ateliê Março, Internet, Luz..." value={formData.description} 
-                  onChange={e => setFormData({...formData, description: e.target.value})} />
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2 text-center">
+                <label className="text-[10px] font-black uppercase text-secondary-400">Tipo</label>
+                <div className="flex gap-4 p-2 bg-secondary-50 rounded-3xl">
+                  <button type="button" onClick={() => setFormData({...formData, type: 'receita'})} className={`flex-1 py-4 rounded-2xl font-black text-[10px] uppercase transition-all ${formData.type === 'receita' ? 'bg-emerald-500 text-white' : 'text-secondary-400'}`}>Receita</button>
+                  <button type="button" onClick={() => setFormData({...formData, type: 'despesa'})} className={`flex-1 py-4 rounded-2xl font-black text-[10px] uppercase transition-all ${formData.type === 'despesa' ? 'bg-red-500 text-white' : 'text-secondary-400'}`}>Despesa</button>
+                </div>
               </div>
-
+              <input required className="w-full p-6 bg-secondary-50 border-2 border-transparent focus:border-indigo-600 rounded-[2rem] outline-none font-bold text-sm" placeholder="Descrição" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Valor (R$)</label>
-                  <input required type="number" step="0.01" className="w-full p-4 border rounded-2xl outline-none text-sm font-bold text-red-600" 
-                    placeholder="0,00" value={formData.value} 
-                    onChange={e => setFormData({...formData, value: e.target.value})} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Data de Vencimento</label>
-                  <input required type="date" className="w-full p-4 border rounded-2xl outline-none text-sm font-medium" 
-                    value={formData.dueDate} onChange={e => setFormData({...formData, dueDate: e.target.value})} />
-                </div>
+                <input required type="number" step="0.01" className="w-full p-6 bg-secondary-50 border-2 border-transparent focus:border-indigo-600 rounded-[2rem] outline-none font-black text-lg" placeholder="0,00" value={formData.value} onChange={e => setFormData({...formData, value: e.target.value})} />
+                <input required type="date" className="w-full p-6 bg-secondary-50 border-2 border-transparent focus:border-indigo-600 rounded-[2rem] outline-none font-bold text-sm" value={formData.dueDate} onChange={e => setFormData({...formData, dueDate: e.target.value})} />
               </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Categoria da Conta</label>
-                <select 
-                  className="w-full p-4 border rounded-2xl outline-none bg-white text-sm font-medium focus:border-red-500"
-                  value={formData.category}
-                  onChange={e => setFormData({...formData, category: e.target.value})}
-                >
-                  {CATEGORIES.map(cat => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
-                </select>
-              </div>
-
-              <div className="bg-secondary-50 p-4 rounded-2xl flex items-center gap-3 border border-dashed border-secondary-200">
-                <input 
-                  type="checkbox" 
-                  id="paid" 
-                  className="w-5 h-5 rounded border-secondary-300 text-red-600 focus:ring-red-500"
-                  checked={formData.status === 'PAGO'}
-                  onChange={e => setFormData({...formData, status: e.target.checked ? 'PAGO' : 'PENDENTE'})}
-                />
-                <label htmlFor="paid" className="text-xs font-bold text-secondary-700 cursor-pointer">Marcar como pago (Liquidado hoje)</label>
-              </div>
-
-              <button className="w-full py-5 mt-4 bg-red-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-red-100 hover:bg-red-600 transition-all transform hover:-translate-y-1">
-                Salvar Despesa no Caixa
-              </button>
+              <button className="w-full py-7 bg-secondary-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.3em] hover:bg-indigo-600 transition-all shadow-2xl">Confirmar Lançamento</button>
             </form>
           </div>
         </div>

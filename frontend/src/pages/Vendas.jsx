@@ -1,51 +1,50 @@
-import { useEffect, useState, useCallback, useMemo } from 'react' // Adicionado useMemo
-import { Plus, Search, Trash2, ShoppingCart, Receipt, Loader2, X, CreditCard, AlertTriangle, Scissors } from 'lucide-react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Plus, Trash2, ShoppingCart, Receipt, Loader2, X, Scissors, Download } from 'lucide-react'
 import api from '../services/api'
 
 export function Vendas() {
-  // --- ESTADOS ---
   const [sales, setSales] = useState([])         
   const [customers, setCustomers] = useState([]) 
   const [products, setProducts] = useState([])   
+  const [approvedQuotes, setApprovedQuotes] = useState([]) 
   const [loading, setLoading] = useState(true)   
   const [showForm, setShowForm] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false) 
-  const [isSobMedida, setIsSobMedida] = useState(false) // NOVO: Controle de filtro
+  const [isSobMedida, setIsSobMedida] = useState(false)
 
   const [formData, setFormData] = useState({
     customerId: '',
     items: [{ productId: '', quantity: 1, price: 0 }],
     paymentMethod: 'CASH',
-    installments: 1,       
+    totalValue: 0,
+    valorEntrada: 0,
+    numParcelas: 1,
     notes: '',
+    quoteId: null 
   })
 
-  // --- FILTRO DE PRODUTOS DINÂMICO ---
-  // Só mostra PEÇA_PRONTA por padrão. Se ativar "Sob Medida", mostra tudo.
-  const filteredProducts = useMemo(() => {
-    if (isSobMedida) return products;
-    return products.filter(p => p.category === 'PEÇA_PRONTA');
-  }, [products, isSobMedida]);
-
   const formatCurrency = (value) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    }).format(value || 0)
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0)
   }
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true)
-      const [salesRes, customersRes, productsRes] = await Promise.all([
+      const [salesRes, customersRes, productsRes, quotesRes] = await Promise.all([
         api.get('/sales'),
         api.get('/crm/customers'),
-        api.get('/products')
+        api.get('/products'),
+        api.get('/quotes') // Busca todos
       ])
       
-      setSales(salesRes.data.data || salesRes.data || [])
-      setCustomers(customersRes.data.data || customersRes.data || [])
-      setProducts(productsRes.data.data || productsRes.data || [])
+      setSales(salesRes.data.data || [])
+      setCustomers(customersRes.data.data || [])
+      setProducts(productsRes.data.data || [])
+      
+      // Filtra apenas os APROVADOS que ainda não foram FINALIZADOS
+      const quotes = quotesRes.data.data || []
+      setApprovedQuotes(quotes.filter(q => q.status === 'APROVADO'))
+      
     } catch (error) {
       console.error('Erro ao buscar dados:', error)
     } finally {
@@ -53,15 +52,31 @@ export function Vendas() {
     }
   }, [])
 
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
+  useEffect(() => { fetchData() }, [fetchData])
+
+  // CORREÇÃO: Função de importação agora mapeia os campos corretamente
+  const handleImportQuote = (quoteId) => {
+    if (!quoteId) return
+    const quote = approvedQuotes.find(q => q.id === quoteId)
+    if (!quote) return
+
+    setFormData(prev => ({
+      ...prev,
+      customerId: quote.customerId || '',
+      items: quote.items.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        price: item.price
+      })),
+      totalValue: quote.totalValue || 0,
+      quoteId: quote.id,
+      notes: `Importado do Orçamento #${quote.id.substring(0,5)}`
+    }))
+    setIsSobMedida(true)
+  }
 
   const handleAddItem = () => {
-    setFormData({
-      ...formData,
-      items: [...formData.items, { productId: '', quantity: 1, price: 0 }]
-    })
+    setFormData({ ...formData, items: [...formData.items, { productId: '', quantity: 1, price: 0 }] })
   }
 
   const handleRemoveItem = (index) => {
@@ -72,135 +87,99 @@ export function Vendas() {
   const handleItemChange = (index, field, value) => {
     const newItems = [...formData.items]
     newItems[index][field] = value
-
+    
     if (field === 'productId') {
       const product = products.find(p => p.id === value)
-      if (product) {
-        newItems[index].price = product.price || 0
-      }
+      if (product) newItems[index].price = product.price || 0
     }
     
-    setFormData({ ...formData, items: newItems })
+    const newTotal = newItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.price)), 0)
+    setFormData(prev => ({ ...prev, items: newItems, totalValue: newTotal }))
   }
 
-  const calculateTotal = () => {
-    return formData.items.reduce((sum, item) => sum + (item.quantity * item.price), 0)
+  // CORREÇÃO: Função Delete que chama a rota correta do backend
+  const handleDeleteSale = async (id) => {
+    if (!confirm('Deseja realmente excluir esta venda? Isso não estornará o estoque automaticamente.')) return
+    try {
+      await api.delete(`/sales/${id}`)
+      setSales(sales.filter(s => s.id !== id))
+    } catch (error) {
+      alert('Erro ao excluir venda.')
+    }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!formData.customerId || formData.items.some(i => !i.productId)) {
-      alert('Por favor, selecione o cliente e os produtos.')
-      return
-    }
+    if (!formData.customerId || formData.items.length === 0) return alert('Dados incompletos.')
 
     try {
       setIsSubmitting(true)
       const customer = customers.find(c => c.id === formData.customerId)
       
       const payload = {
-        customerId: formData.customerId,
-        customerName: customer?.name || 'Cliente Desconhecido',
-        items: formData.items,
-        paymentMethod: formData.paymentMethod,
-        totalValue: calculateTotal(),
-        numParcelas: formData.paymentMethod === 'CREDIT' ? formData.installments : 0,
-        isSobMedida: isSobMedida, // Enviando a flag para o backend
-        notes: formData.notes,
-        createdAt: new Date().toISOString()
+        ...formData,
+        customerName: customer?.name || "Cliente não identificado",
+        createdAt: new Date()
       }
 
-      const response = await api.post('/sales', payload)
-      
-      // VERIFICAÇÃO DE ALERTAS DE ESTOQUE (Vindo do backend)
-      if (response.data.alerts && response.data.alerts.length > 0) {
-        alert("Venda realizada com avisos:\n\n" + response.data.alerts.join('\n'));
-      } else {
-        alert('Venda registrada com sucesso!');
-      }
+      await api.post('/sales', payload)
       
       setShowForm(false)
-      setIsSobMedida(false) // Resetar o modo
-      setFormData({
-        customerId: '',
-        items: [{ productId: '', quantity: 1, price: 0 }],
-        paymentMethod: 'CASH',
-        installments: 1,
-        notes: '',
-      })
-      await fetchData() 
+      setIsSobMedida(false)
+      setFormData({ customerId: '', items: [{ productId: '', quantity: 1, price: 0 }], totalValue: 0, valorEntrada: 0, numParcelas: 1, notes: '', quoteId: null })
+      fetchData()
+      alert('Venda realizada com sucesso!')
     } catch (error) {
-      console.error('Erro ao salvar venda:', error)
-      alert('Erro ao processar venda. Verifique o estoque disponível ou a conexão.')
+      alert('Erro ao salvar venda.')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const handleDelete = async (id, name) => {
-    if (window.confirm(`Deseja cancelar a venda de ${name}? O estoque será estornado.`)) {
-      try {
-        await api.delete(`/sales/${id}`)
-        fetchData()
-      } catch (error) {
-        console.error('Erro ao eliminar:', error)
-      }
-    }
-  }
+  const filteredProducts = useMemo(() => {
+    return products // Removido filtro restritivo para facilitar teste, mude conforme necessidade
+  }, [products]);
 
-  if (loading) {
-    return <div className="flex h-96 items-center justify-center"><Loader2 className="animate-spin text-primary-600" size={40} /></div>
-  }
+  if (loading) return <div className="flex justify-center p-10"><Loader2 className="animate-spin text-primary-600" /></div>
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-secondary-900 flex items-center gap-2">
+          <h1 className="text-2xl font-black text-secondary-900 flex items-center gap-2">
             <ShoppingCart className="text-primary-600" /> Vendas e Pedidos
           </h1>
-          <p className="text-secondary-500 text-sm">Gerencie as vendas e baixas de estoque do ateliê</p>
+          <p className="text-secondary-500 text-sm font-medium">Gerencie vendas e peças sob medida</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-primary-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-primary-700 transition-all shadow-sm"
-        >
+        <button onClick={() => setShowForm(true)} className="bg-primary-600 text-white px-6 py-2.5 rounded-xl flex items-center gap-2 hover:bg-primary-700 transition-all shadow-lg font-black text-xs uppercase">
           <Plus size={20} /> Nova Venda
         </button>
       </div>
 
-      {/* TABELA DE VENDAS (Mantida conforme original) */}
-      <div className="bg-white rounded-xl shadow-sm border border-secondary-200 overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead className="bg-secondary-50 border-b border-secondary-200">
+      {/* TABELA DE VENDAS */}
+      <div className="bg-white rounded-[2rem] shadow-sm border border-secondary-100 overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-secondary-50/50 border-b border-secondary-100">
             <tr>
-              <th className="px-6 py-4 text-sm font-bold text-secondary-700">Cliente</th>
-              <th className="px-6 py-4 text-sm font-bold text-secondary-700">Data</th>
-              <th className="px-6 py-4 text-sm font-bold text-secondary-700">Pagamento</th>
-              <th className="px-6 py-4 text-sm font-bold text-secondary-700 text-right">Total</th>
-              <th className="px-6 py-4 text-sm font-bold text-secondary-700 text-center">Ações</th>
+              <th className="px-6 py-4 text-[10px] font-black text-secondary-400 uppercase">Cliente</th>
+              <th className="px-6 py-4 text-[10px] font-black text-secondary-400 uppercase">Data</th>
+              <th className="px-6 py-4 text-[10px] font-black text-secondary-400 uppercase text-right">Total</th>
+              <th className="px-6 py-4 text-[10px] font-black text-secondary-400 uppercase text-center">Ações</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-secondary-100">
+          <tbody className="divide-y divide-secondary-50">
             {sales.map((sale) => (
-              <tr key={sale.id} className="hover:bg-secondary-50 transition-colors">
-                <td className="px-6 py-4 font-semibold text-secondary-900">
+              <tr key={sale.id} className="hover:bg-secondary-50/50 transition-colors">
+                <td className="px-6 py-4">
                     <div className="flex flex-col">
-                        {sale.customerName}
-                        {sale.isSobMedida && <span className="text-[10px] text-primary-500 font-bold flex items-center gap-1"><Scissors size={10}/> SOB MEDIDA</span>}
+                        <span className="font-bold text-secondary-900">{sale.customerName}</span>
+                        {sale.quoteId && <span className="text-[9px] text-primary-500 font-black flex items-center gap-1 uppercase"><Scissors size={10}/> Projeto Sob Medida</span>}
                     </div>
                 </td>
-                <td className="px-6 py-4 text-sm text-secondary-500">{new Date(sale.createdAt).toLocaleDateString('pt-BR')}</td>
-                <td className="px-6 py-4">
-                  <span className="px-2 py-1 bg-secondary-100 text-secondary-600 rounded text-[10px] font-bold uppercase">
-                    {sale.paymentMethod === 'CREDIT' ? `${sale.numParcelas || sale.installments}x Cartão` : sale.paymentMethod}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-right font-bold text-primary-600">{formatCurrency(sale.totalValue || sale.total)}</td>
+                <td className="px-6 py-4 text-xs font-bold text-secondary-400">{new Date(sale.createdAt).toLocaleDateString('pt-BR')}</td>
+                <td className="px-6 py-4 text-right font-black text-secondary-900">{formatCurrency(sale.totalValue)}</td>
                 <td className="px-6 py-4 text-center">
-                  <button onClick={() => handleDelete(sale.id, sale.customerName)} className="p-2 text-secondary-400 hover:text-red-600 rounded-lg transition-all">
-                    <Trash2 size={18}/>
-                  </button>
+                  <button onClick={() => handleDeleteSale(sale.id)} className="p-2 text-secondary-300 hover:text-red-500 transition-all"><Trash2 size={16}/></button>
                 </td>
               </tr>
             ))}
@@ -208,97 +187,90 @@ export function Vendas() {
         </table>
       </div>
 
+      {/* MODAL */}
       {showForm && (
         <div className="fixed inset-0 bg-secondary-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-secondary-100 flex justify-between items-center bg-secondary-50">
-              <h2 className="text-xl font-bold text-secondary-900 flex items-center gap-2"><Receipt className="text-primary-600" /> Novo Pedido</h2>
-              <button onClick={() => setShowForm(false)} className="text-secondary-400 hover:text-secondary-600"><X size={24} /></button>
+          <div className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="p-8 border-b border-secondary-50 flex justify-between items-center">
+              <h2 className="text-xl font-black text-secondary-900 flex items-center gap-2">
+                <Receipt className="text-primary-600" /> Registrar Pedido
+              </h2>
+              <button onClick={() => setShowForm(false)} className="text-secondary-400 hover:text-secondary-600 bg-secondary-50 p-2 rounded-full"><X size={20} /></button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto">
-              
-              {/* NOVO: SELETOR SOB MEDIDA */}
-              <div className="flex items-center justify-between p-4 bg-primary-50 rounded-xl border border-primary-100">
-                <div className="flex items-center gap-3">
-                    <Scissors className="text-primary-600" size={24} />
-                    <div>
-                        <p className="text-sm font-bold text-primary-900">Encomenda Sob Medida?</p>
-                        <p className="text-[11px] text-primary-600">Ative para selecionar tecidos e insumos</p>
-                    </div>
-                </div>
-                <button 
-                    type="button"
-                    onClick={() => setIsSobMedida(!isSobMedida)}
-                    className={`w-12 h-6 rounded-full transition-colors relative ${isSobMedida ? 'bg-primary-600' : 'bg-secondary-300'}`}
+            <form onSubmit={handleSubmit} className="p-8 space-y-6 overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div 
+                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3 ${isSobMedida ? 'border-primary-600 bg-primary-50' : 'border-secondary-100 bg-secondary-50'}`} 
+                  onClick={() => setIsSobMedida(!isSobMedida)}
                 >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isSobMedida ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-secondary-700 mb-2">Cliente</label>
-                <select required className="w-full px-4 py-2.5 border border-secondary-200 rounded-xl bg-white" value={formData.customerId} onChange={(e) => setFormData({ ...formData, customerId: e.target.value })}>
-                  <option value="">Selecione um cliente...</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <label className="text-sm font-bold text-secondary-700">Produtos {!isSobMedida && "(Peças Prontas)"}</label>
-                  <button type="button" onClick={handleAddItem} className="text-primary-600 text-sm font-bold">+ Adicionar Item</button>
-                </div>
-                {formData.items.map((item, index) => (
-                  <div key={index} className="grid grid-cols-12 gap-3 items-end bg-secondary-50 p-3 rounded-xl">
-                    <div className="col-span-6">
-                      <select required className="w-full px-3 py-2 border rounded-lg text-sm bg-white" value={item.productId} onChange={(e) => handleItemChange(index, 'productId', e.target.value)}>
-                        <option value="">Selecione...</option>
-                        {filteredProducts.map(p => (
-                            <option key={p.id} value={p.id}>
-                                [{p.category.replace('_', ' ')}] {p.name} (Stock: {p.stock} {p.unit})
-                            </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                      <input type="number" min="1" className="w-full px-3 py-2 border rounded-lg text-sm" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value))} />
-                    </div>
-                    <div className="col-span-3">
-                      <input type="number" step="0.01" className="w-full px-3 py-2 border rounded-lg text-sm" value={item.price} onChange={(e) => handleItemChange(index, 'price', parseFloat(e.target.value))} />
-                    </div>
-                    <div className="col-span-1">
-                      <button type="button" onClick={() => handleRemoveItem(index)} className="text-secondary-400 hover:text-red-600"><Trash2 size={18} /></button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-secondary-700 mb-2">Pagamento</label>
-                  <select className="w-full px-4 py-2 border rounded-xl bg-white" value={formData.paymentMethod} onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}>
-                    <option value="CASH">Dinheiro / PIX</option>
-                    <option value="CREDIT">Cartão de Crédito</option>
-                  </select>
-                </div>
-                {formData.paymentMethod === 'CREDIT' && (
+                  <Scissors className={isSobMedida ? 'text-primary-600' : 'text-secondary-400'} size={20} />
                   <div>
-                    <label className="block text-sm font-bold text-secondary-700 mb-2">Parcelas</label>
-                    <select className="w-full px-4 py-2 border rounded-xl bg-white" value={formData.installments} onChange={(e) => setFormData({ ...formData, installments: parseInt(e.target.value) })}>
-                      {[1,2,3,4,6,10,12].map(n => <option key={n} value={n}>{n}x</option>)}
+                    <p className="font-black text-[10px] uppercase tracking-widest text-secondary-900">Sob Medida</p>
+                    <p className="text-[10px] text-secondary-400 font-bold">Peça exclusiva</p>
+                  </div>
+                </div>
+
+                {isSobMedida && (
+                  <div className="p-4 rounded-2xl border-2 border-amber-200 bg-amber-50 flex items-center gap-3">
+                    <Download className="text-amber-600" size={20} />
+                    <select 
+                      className="bg-transparent text-[10px] font-black uppercase outline-none w-full"
+                      onChange={(e) => handleImportQuote(e.target.value)}
+                      value={formData.quoteId || ''}
+                    >
+                      <option value="">Importar Orçamento...</option>
+                      {approvedQuotes.map(q => <option key={q.id} value={q.id}>{q.customerName} - {formatCurrency(q.totalValue)}</option>)}
                     </select>
                   </div>
                 )}
               </div>
 
-              <div className="bg-primary-50 p-4 rounded-2xl flex justify-between items-center">
-                <span className="text-primary-700 font-bold">Total:</span>
-                <span className="text-2xl font-black text-primary-600">{formatCurrency(calculateTotal())}</span>
+              <div>
+                <label className="block text-[10px] font-black text-secondary-400 uppercase mb-2 ml-1">Cliente</label>
+                <select required className="w-full px-4 py-3 bg-secondary-50 border-none rounded-xl font-bold text-sm" value={formData.customerId} onChange={(e) => setFormData({ ...formData, customerId: e.target.value })}>
+                  <option value="">Selecione a cliente...</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
 
-              <button type="submit" disabled={isSubmitting} className="w-full bg-primary-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-primary-700 disabled:opacity-50 transition-all shadow-lg flex items-center justify-center gap-2">
-                {isSubmitting ? <Loader2 className="animate-spin" /> : 'Confirmar Venda'}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Itens</label>
+                    <button type="button" onClick={handleAddItem} className="text-primary-600 text-[10px] font-black hover:underline">+ ADD ITEM</button>
+                </div>
+                {formData.items.map((item, index) => (
+                  <div key={index} className="flex gap-2 items-center bg-secondary-50 p-3 rounded-xl border border-secondary-100">
+                    <select required className="flex-1 bg-transparent text-xs font-bold outline-none" value={item.productId} onChange={(e) => handleItemChange(index, 'productId', e.target.value)}>
+                      <option value="">Buscar produto...</option>
+                      {filteredProducts.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
+                    </select>
+                    <input type="number" className="w-12 bg-white rounded-lg p-1 text-center text-xs font-bold" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))} />
+                    <input type="number" className="w-20 bg-white rounded-lg p-1 text-right text-xs font-bold" value={item.price} onChange={(e) => handleItemChange(index, 'price', Number(e.target.value))} />
+                    <button type="button" onClick={() => handleRemoveItem(index)} className="text-rose-400 hover:text-rose-600"><Trash2 size={16} /></button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 gap-4 p-6 bg-secondary-900 rounded-[2rem] text-white shadow-xl">
+                <div>
+                  <label className="block text-[9px] uppercase opacity-50 mb-1 font-black tracking-widest">Preço Final</label>
+                  <input type="number" className="bg-transparent border-b border-secondary-700 w-full text-lg font-black outline-none" value={formData.totalValue} onChange={(e) => setFormData({...formData, totalValue: Number(e.target.value)})} />
+                </div>
+                <div>
+                  <label className="block text-[9px] uppercase opacity-50 mb-1 font-black tracking-widest">Entrada</label>
+                  <input type="number" className="bg-transparent border-b border-secondary-700 w-full text-lg font-black text-emerald-400 outline-none" value={formData.valorEntrada} onChange={(e) => setFormData({...formData, valorEntrada: Number(e.target.value)})} />
+                </div>
+                <div>
+                  <label className="block text-[9px] uppercase opacity-50 mb-1 font-black tracking-widest">Parcelas</label>
+                  <select className="bg-transparent border-b border-secondary-700 w-full text-lg font-black outline-none" value={formData.numParcelas} onChange={(e) => setFormData({...formData, numParcelas: Number(e.target.value)})}>
+                    {[1,2,3,4,5,6,10,12].map(n => <option key={n} value={n} className="text-black">{n}x</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <button type="submit" disabled={isSubmitting} className="w-full bg-primary-600 text-white py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-widest hover:bg-primary-700 shadow-xl flex items-center justify-center gap-2 transition-all">
+                {isSubmitting ? <Loader2 className="animate-spin" /> : 'CONFIRMAR VENDA'}
               </button>
             </form>
           </div>

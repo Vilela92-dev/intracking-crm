@@ -1,315 +1,322 @@
 import express from 'express';
-import type { Request, Response } from 'express';
 import cors from 'cors';
+import { v4 as uuidv4 } from 'uuid';
 
 const app = express();
-const port = 3000;
-
 app.use(cors());
 app.use(express.json());
 
-// --- 1. MODELOS DE DADOS (POO) ---
+const PORT = 3000;
 
-abstract class Produto {
-  id: string; name: string; price: number; stock: number; minStock: number; supplierId?: string;
-  lastPurchaseId?: string; // Vínculo para estorno financeiro
-  abstract category: 'PEÇA' | 'INSUMO' | 'PEÇA_PRONTA'; 
-  abstract unit: 'UN' | 'METROS';
-  
-  constructor(data: any) {
-    this.id = data.id || `prod-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    this.name = data.name.toUpperCase(); 
-    this.price = Number(data.price || data.unitPrice) || 0;
-    this.stock = Number(data.stock || data.quantity || 0); 
-    this.minStock = Number(data.minStock || 0);
-    this.supplierId = data.supplierId;
-    this.lastPurchaseId = data.lastPurchaseId;
+// ==========================================
+// BANCO DE DADOS EM MEMÓRIA
+// ==========================================
+const db: any = {
+  products: [],
+  customers: [],
+  suppliers: [],
+  quotes: [],
+  sales: [],
+  rentals: [],
+  appointments: [],
+  finance: []
+};
+
+// ==========================================
+// HELPERS DE LÓGICA DE NEGÓCIO
+// ==========================================
+
+/**
+ * Atualiza o status do cliente seguindo a jornada da noiva.
+ * Garante que o status só avance (Prospecção -> Orçamento -> Contrato -> Concluído).
+ */
+const updateCustomerStatus = (customerId: string, newStatus: string) => {
+  if (!customerId) return;
+  const customer = db.customers.find((c: any) => c.id === customerId);
+  if (customer) {
+    const niveis: any = { 'PROSPECÇÃO': 1, 'ORÇAMENTO': 2, 'CONTRATO FECHADO': 3, 'CONCLUÍDO': 4 };
+    if (niveis[newStatus] > (niveis[customer.status] || 0)) {
+      customer.status = newStatus;
+      console.log(`[CRM] Cliente ${customer.name} atualizado para: ${newStatus}`);
+    }
   }
-  baixarEstoque(qty: number) { this.stock -= Number(qty); }
-  estornarEstoque(qty: number) { this.stock += Number(qty); }
-  adicionarEstoque(qty: number) { this.stock += Number(qty); }
-}
-
-class PecaAcabada extends Produto { category: 'PEÇA' = 'PEÇA'; unit: 'UN' = 'UN'; }
-class Insumo extends Produto { category: 'INSUMO' = 'INSUMO'; unit: 'METROS' = 'METROS'; }
-class PecaPronta extends Produto { category: 'PEÇA_PRONTA' = 'PEÇA_PRONTA'; unit: 'UN' = 'UN'; }
-
-// --- 2. BANCO DE DADOS EM MEMÓRIA ---
-
-const database = {
-  products: [] as Produto[],
-  sales: [] as any[],
-  customers: [] as any[],
-  suppliers: [] as any[],
-  appointments: [] as any[], 
-  bills: [] as any[], 
-  logs: [] as any[]
 };
 
-// --- 3. FUNÇÃO DE AUDITORIA (LOGS) ---
-
-const registrarLog = (acao: string, detalhes: string) => {
-  database.logs.push({ id: Date.now(), data: new Date(), acao, detalhes });
-  console.log(`[${acao}] ${detalhes}`);
+/**
+ * Gerencia a movimentação física e lógica do estoque.
+ * 'reserve': Tira do disponível e coloca em espera.
+ * 'unreserve': Devolve do espera para o disponível (cancelamento).
+ * 'decrease': Saída definitiva para produção/venda.
+ */
+const updateStock = (productId: string, qty: number, type: 'increase' | 'decrease' | 'reserve' | 'release' | 'unreserve') => {
+  const p = db.products.find((prod: any) => prod.id === productId || prod._id === productId);
+  if (!p) return;
+  const amount = Number(qty);
+  switch (type) {
+    case 'increase': p.stock += amount; break;
+    case 'decrease': p.stock -= amount; break;
+    case 'reserve': 
+      p.stock -= amount;
+      p.reserved = (p.reserved || 0) + amount;
+      break;
+    case 'release': p.reserved = (p.reserved || 0) - amount; break;
+    case 'unreserve': 
+      p.reserved = (p.reserved || 0) - amount;
+      p.stock += amount;
+      break;
+  }
 };
 
-// --- 4. FUNÇÃO AUXILIAR DE SINCRONIZAÇÃO AGENDA ---
-
-const sincronizarAgendaNoiva = (customerId: string, name: string, weddingDate?: string, trials: any[] = []) => {
-  database.appointments = database.appointments.filter(a => 
-    !a.id.startsWith(`CELEB-${customerId}`) && !a.id.startsWith(`TRIAL-${customerId}`)
+/**
+ * Helper para criação/atualização de itens vindos da produção.
+ * Normaliza unidades de medida (Metros, Unidades) e gerencia categorias.
+ */
+const updateOrAddProduct = (item: any) => {
+  let product = db.products.find((p: any) => 
+    (item.id && p.id === item.id) || 
+    (item.productId && p.id === item.productId) || 
+    (p.name.toUpperCase() === item.name.toUpperCase() && p.category === item.category)
   );
 
-  if (weddingDate) {
-    database.appointments.push({
-      id: `CELEB-${customerId}`,
-      customerName: name,
-      service: `💍 CASAMENTO: ${name}`,
-      date: weddingDate,
-      time: "00:00", 
-      type: 'CASAMENTO',
-      isSystemGenerated: true,
-      createdAt: new Date()
-    });
-  }
+  const quantity = Number(item.quantity || item.usedQty || 0);
+  const price = Number(item.unitPrice || item.price || 0);
 
-  if (Array.isArray(trials)) {
-    trials.forEach((trial, index) => {
-      if (trial.date) {
-        database.appointments.push({
-          id: `TRIAL-${customerId}-${index}`,
-          customerName: name,
-          service: `${trial.description || 'Prova'}: ${name}`,
-          date: trial.date,
-          time: trial.time || "09:00",
-          type: 'NOIVA',
-          isSystemGenerated: true,
-          createdAt: new Date()
-        });
-      }
-    });
+  let unitLabel = 'UNIDADE';
+  const rawUnit = (item.unitType || item.unit || '').toUpperCase();
+  if (rawUnit.includes('METRO') || rawUnit === 'M') unitLabel = 'METROS';
+
+  if (product) {
+    product.stock += quantity;
+    if (price > 0) product.price = price;
+    if (item.can_rent !== undefined) product.can_rent = item.can_rent;
+    if (item.can_sell !== undefined) product.can_sell = item.can_sell;
+    return product;
+  } else {
+    const newProduct = {
+      id: uuidv4(),
+      name: item.name.toUpperCase(),
+      unit: unitLabel,
+      category: item.category || 'INSUMO',
+      stock: quantity,
+      reserved: 0,
+      price: price,
+      can_rent: item.can_rent || false,
+      can_sell: item.can_sell || false,
+      status: item.status || 'DISPONIVEL',
+      createdAt: new Date()
+    };
+    db.products.push(newProduct);
+    return newProduct;
   }
 };
 
-// --- 5. ROTAS DE FORNECEDORES ---
+const router = express.Router();
 
-app.get('/api/v1/suppliers', (req, res) => res.json({ success: true, data: database.suppliers }));
+// ==========================================
+// 1. ROTAS DE IMPRESSÃO (CORREÇÃO ERRO 404)
+// ==========================================
 
-app.post('/api/v1/suppliers', (req, res) => {
-  const novo = { id: Date.now().toString(), ...req.body, createdAt: new Date() };
-  database.suppliers.push(novo);
-  registrarLog("FORNECEDOR", `Cadastrado: ${novo.name}`);
-  res.status(201).json({ success: true, data: novo });
+/**
+ * Rota específica para gerar o espelho do orçamento para impressão.
+ * Deve ser declarada antes das rotas genéricas para não ser confundida com ID.
+ */
+router.get('/quotes/:id/print', (req, res) => {
+  const quote = db.quotes.find((q: any) => q.id === req.params.id);
+  if (!quote) return res.status(404).send("<h1>Orçamento não encontrado</h1>");
+
+  res.send(`
+    <html>
+      <body style="font-family: Arial, sans-serif; padding: 30px;">
+        <h1 style="border-bottom: 2px solid #333;">Orçamento #${quote.id.substring(0,8)}</h1>
+        <p><strong>Cliente:</strong> ${quote.customerName}</p>
+        <p><strong>Total:</strong> R$ ${quote.totalValue}</p>
+        <h3>Itens:</h3>
+        <ul>${quote.items?.map((i: any) => `<li>${i.name} - Qtd: ${i.quantity}</li>`).join('')}</ul>
+        <script>window.onload = () => window.print();</script>
+      </body>
+    </html>
+  `);
 });
 
-// --- 6. ROTAS DE PRODUTOS E ESTOQUE (REVISADAS) ---
+// ==========================================
+// 2. ESTOQUE E PRODUÇÃO
+// ==========================================
 
-app.get('/api/v1/products', (req, res) => res.json({ success: true, data: database.products }));
+router.get('/products', (req, res) => res.json({ data: db.products || [] }));
 
-// LANÇAMENTO DE COMPRA MULTITENS (CORRIGIDO: VINCULA FINANCEIRO)
-app.post('/api/v1/products/purchase', (req, res) => {
-  try {
-    const { items, supplierId, description, bills } = req.body;
-    const purchaseId = `PURCH-${Date.now()}`;
-    const updatedProducts: Produto[] = [];
+/**
+ * Busca produtos disponíveis para locação (Peças prontas ou marcados como alugáveis).
+ */
+router.get('/products/rentables', (req, res) => {
+  const rentables = db.products.filter((p: any) => 
+    (p.can_rent === true || p.category === 'PEÇA_PRONTA') && p.stock > 0
+  );
+  res.json({ data: rentables });
+});
 
-    items.forEach((itemData: any) => {
-      const nomeNormalizado = itemData.name.toUpperCase();
-      let produtoExistente = database.products.find(p => p.name === nomeNormalizado);
-
-      if (produtoExistente) {
-        produtoExistente.adicionarEstoque(itemData.quantity);
-        produtoExistente.price = Number(itemData.unitPrice || itemData.price);
-        produtoExistente.lastPurchaseId = purchaseId; // Vincula a última compra
-        updatedProducts.push(produtoExistente);
-      } else {
-        let novo: Produto;
-        const payload = { ...itemData, name: nomeNormalizado, lastPurchaseId: purchaseId };
-        
-        if (itemData.unitType === 'METRO' || itemData.category === 'INSUMO') novo = new Insumo(payload);
-        else if (itemData.category === 'PEÇA_PRONTA') novo = new PecaPronta(payload);
-        else novo = new PecaAcabada(payload);
-        
-        database.products.push(novo);
-        updatedProducts.push(novo);
-      }
+/**
+ * Processa a produção de novos vestidos/itens.
+ * Consome insumos (decrease) e cria/atualiza o produto final.
+ */
+router.post('/products/produce', (req, res) => {
+  const { items, composition, bills } = req.body;
+  if (composition) {
+    composition.forEach((c: any) => {
+      const prodId = c.productId || c.id;
+      if (prodId) updateStock(prodId, c.quantityUsed, 'decrease');
     });
+  }
+  if (items) items.forEach((i: any) => updateOrAddProduct(i));
+  if (bills) {
+    bills.forEach((bill: any, idx: number) => {
+      db.finance.push({
+        id: uuidv4(), type: 'despesa', value: Number(bill.value || 0),
+        status: 'PENDENTE', description: `Parcela ${idx + 1}/${bills.length} - Produção`,
+        dueDate: bill.dueDate || new Date(), createdAt: new Date()
+      });
+    });
+  }
+  res.status(201).json({ message: "Operação realizada com sucesso" });
+});
 
-    // PARCELAMENTO NO FINANCEIRO (VINCULADO AO purchaseId)
-    if (bills && Array.isArray(bills)) {
-      bills.forEach((p, idx) => {
-        database.bills.push({
-          id: `bill-purc-${Date.now()}-${idx}`,
-          originId: purchaseId, // CRUCIAL: Identifica de onde veio a dívida
-          description: description || `Compra de Suprimentos: ${items[0].name}`,
-          value: Number(p.value),
-          category: 'SUPRIMENTOS',
-          type: 'despesa', 
-          status: 'PENDENTE', 
-          dueDate: p.dueDate, 
-          createdAt: new Date()
-        });
+router.delete('/products/:id', (req, res) => {
+  const initialLength = db.products.length;
+  db.products = db.products.filter((p: any) => p.id !== req.params.id && p._id !== req.params.id);
+  res.status(db.products.length < initialLength ? 204 : 404).send();
+});
+
+// ==========================================
+// 3. ORÇAMENTOS, VENDAS E ALUGUÉIS
+// ==========================================
+
+router.get('/quotes', (req, res) => res.json({ data: db.quotes || [] }));
+
+router.post('/quotes', (req, res) => {
+  const q = { ...req.body, id: uuidv4(), status: 'PENDENTE', createdAt: new Date() };
+  db.quotes.push(q);
+  updateCustomerStatus(q.customerId, 'ORÇAMENTO');
+  res.status(201).json(q);
+});
+
+/**
+ * Reserva o estoque quando o orçamento é aprovado pela cliente.
+ */
+router.patch('/quotes/:id/approve', (req, res) => {
+  const quote = db.quotes.find((q: any) => q.id === req.params.id);
+  if (!quote) return res.status(404).json({ message: "Não encontrado" });
+  if (quote.items) quote.items.forEach((item: any) => updateStock(item.productId, item.quantity, 'reserve'));
+  quote.status = 'APROVADO';
+  res.json(quote);
+});
+
+/**
+ * Gerencia Aluguéis: Faz reserva de estoque, gera contas a receber (parcelamento)
+ * e cria agendamentos automáticos de prova, retirada e devolução.
+ */
+router.post('/rentals', (req, res) => {
+  const { customerId, customerName, items, totalValue, valorEntrada, numParcelas, dataProva, dataRetirada, dataDevolucao } = req.body;
+  const rental = { ...req.body, id: uuidv4(), status: 'RESERVADO', createdAt: new Date() };
+  db.rentals.push(rental);
+
+  updateCustomerStatus(customerId, 'CONTRATO FECHADO');
+  if (items) items.forEach((i: any) => updateStock(i.productId, i.quantity, 'reserve'));
+
+  // Financeiro: Entrada
+  if (Number(valorEntrada) > 0) {
+    db.finance.push({
+      id: uuidv4(), type: 'receita', value: Number(valorEntrada), status: 'PAGO',
+      customerName, description: `Entrada Aluguel - ${customerName}`, dueDate: new Date(), createdAt: new Date()
+    });
+  }
+
+  // Financeiro: Parcelamento do saldo
+  const saldo = Number(totalValue) - Number(valorEntrada);
+  const qtdParcelas = Number(numParcelas) || 1;
+  if (saldo > 0) {
+    const valorParc = saldo / qtdParcelas;
+    for (let i = 1; i <= qtdParcelas; i++) {
+      const d = new Date(); d.setMonth(d.getMonth() + i);
+      db.finance.push({
+        id: uuidv4(), type: 'receita', value: valorParc, status: 'PENDENTE',
+        customerName, description: `Parc ${i}/${qtdParcelas} Aluguel - ${customerName}`, dueDate: d, createdAt: new Date()
       });
     }
-
-    registrarLog("ESTOQUE", `Compra Processada: ${purchaseId}`);
-    res.status(201).json({ success: true, data: updatedProducts });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Erro na compra" });
   }
+
+  // Agenda Automática de Aluguel
+  if (dataProva) db.appointments.push({ id: uuidv4(), title: `PROVA: ${customerName}`, date: dataProva, time: "09:00", type: "PROVA", customerId });
+  if (dataRetirada) db.appointments.push({ id: uuidv4(), title: `RETIRADA: ${customerName}`, date: dataRetirada, time: "10:00", type: "RETIRADA", customerId });
+  if (dataDevolucao) db.appointments.push({ id: uuidv4(), title: `DEVOLUÇÃO: ${customerName}`, date: dataDevolucao, time: "16:00", type: "DEVOLUCAO", customerId });
+
+  res.status(201).json(rental);
 });
 
-// ROTA DE PRODUÇÃO (CONFECÇÃO - CORRIGIDA BAIXA DE INSUMOS)
-app.post('/api/v1/products/produce', (req, res) => {
-  try {
-    const { name, composition, price } = req.body;
-    
-    // CORREÇÃO: Busca por múltiplos campos de ID e garante baixa numérica
-    composition.forEach((comp: any) => {
-      const targetId = comp.productId || comp.id || comp._id;
-      const p = database.products.find(prod => prod.id === targetId);
-      if (p) {
-        p.baixarEstoque(Number(comp.quantityUsed || comp.usedQty));
-        registrarLog("ESTOQUE", `Baixa de produção: ${p.name} (-${comp.usedQty})`);
-      }
-    });
+// ==========================================
+// 4. CRM E HISTÓRICO DE MEDIDAS (PONTO 2)
+// ==========================================
 
-    const novaPeca = new PecaPronta({
-      name: name.toUpperCase(),
-      price: Number(price),
-      stock: 1
-    });
+router.get('/crm/customers', (req, res) => res.json({ data: db.customers || [] }));
 
-    database.products.push(novaPeca);
-    registrarLog("PRODUÇÃO", `Peça concluída: ${name}`);
-    res.status(201).json({ success: true, data: novaPeca });
-  } catch (error) {
-    res.status(500).json({ success: false });
+router.post('/crm/customers', (req, res) => {
+  const customer = { 
+    ...req.body, 
+    id: uuidv4(), 
+    status: req.body.status || 'PROSPECÇÃO',
+    measurementsHistory: req.body.measurementsHistory || [],
+    createdAt: new Date() 
+  };
+  db.customers.push(customer);
+  // Agendamento automático do evento (Casamento)
+  if (customer.eventDate) {
+    db.appointments.push({
+      id: uuidv4(), title: `CASAMENTO: ${customer.name.toUpperCase()}`,
+      date: customer.eventDate, time: "12:00", type: "EVENTO", customerId: customer.id
+    });
   }
+  res.status(201).json(customer);
 });
 
-// DELETE CORRIGIDO (LIMPA PRODUTO + FINANCEIRO PENDENTE)
-app.delete('/api/v1/products/:id', (req, res) => {
-  const { id } = req.params;
-  const index = database.products.findIndex(p => p.id === id);
-  
+/**
+ * Atualiza o cliente e permite salvar snapshots das medidas.
+ * Se 'saveSnapshot' for true, clona o objeto 'measurements' completo para a timeline.
+ */
+router.put('/crm/customers/:id', (req, res) => {
+  const index = db.customers.findIndex((c: any) => c.id === req.params.id);
   if (index !== -1) {
-    const produto = database.products[index];
-    const purchaseId = produto.lastPurchaseId;
-
-    // Se o produto veio de uma compra, limpa as contas PENDENTES dessa compra
-    if (purchaseId) {
-      const totalContas = database.bills.length;
-      database.bills = database.bills.filter(bill => 
-        !(bill.originId === purchaseId && bill.status === 'PENDENTE')
-      );
-      const removidas = totalContas - database.bills.length;
-      if (removidas > 0) registrarLog("FINANCEIRO", `Removidas ${removidas} parcelas da compra ${purchaseId}`);
+    const currentCustomer = db.customers[index];
+    if (req.body.saveSnapshot && req.body.measurements) {
+      const history = currentCustomer.measurementsHistory || [];
+      history.push({ date: new Date(), data: { ...req.body.measurements } });
+      req.body.measurementsHistory = history;
     }
-
-    database.products.splice(index, 1);
-    registrarLog("ESTOQUE", `Excluído: ${produto.name}`);
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ success: false, message: "Produto não encontrado" });
+    db.customers[index] = { ...currentCustomer, ...req.body, id: req.params.id };
+    return res.json(db.customers[index]);
   }
+  res.status(404).json({ message: "Cliente não encontrado" });
 });
 
-// --- (Restante das rotas: CRM, AGENDA, VENDAS permanecem iguais) ---
+// ==========================================
+// 5. FINANCEIRO, AGENDA E FORNECEDORES
+// ==========================================
 
-app.get('/api/v1/crm/customers', (req, res) => res.json({ success: true, data: database.customers }));
+router.get('/finance/bills', (req, res) => res.json({ data: db.finance || [] }));
 
-app.post('/api/v1/crm/customers', (req, res) => {
-  try {
-    const { name, weddingDate, trials } = req.body;
-    const customerId = Date.now().toString();
-    const novaNoiva = { id: customerId, ...req.body, createdAt: new Date() };
-    database.customers.push(novaNoiva);
-    sincronizarAgendaNoiva(customerId, name, weddingDate, trials);
-    registrarLog("CRM", `Noiva cadastrada: ${name}`);
-    res.status(201).json({ success: true, data: novaNoiva });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
+/**
+ * Rota de Agendamentos.
+ * Aceita o campo 'time' vindo do seletor de horas do frontend (PONTO 1).
+ */
+router.post('/appointments', (req, res) => {
+  const a = { ...req.body, id: uuidv4(), time: req.body.time || "00:00" };
+  db.appointments.push(a);
+  res.status(201).json(a);
 });
 
-app.put('/api/v1/crm/customers/:id', (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, weddingDate, trials } = req.body;
-    const index = database.customers.findIndex(c => c.id === id);
-    if (index === -1) return res.status(404).json({ success: false });
-    database.customers[index] = { ...database.customers[index], ...req.body, updatedAt: new Date() };
-    sincronizarAgendaNoiva(id, name, weddingDate, trials);
-    registrarLog("CRM", `Noiva atualizada: ${name}`);
-    res.json({ success: true, data: database.customers[index] });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
+router.get('/suppliers', (req, res) => res.json({ data: db.suppliers || [] }));
+router.post('/suppliers', (req, res) => {
+  const s = { ...req.body, id: uuidv4(), createdAt: new Date() };
+  db.suppliers.push(s);
+  res.status(201).json(s);
 });
 
-app.get('/api/v1/appointments', (req, res) => res.json({ success: true, data: database.appointments }));
-
-app.post('/api/v1/appointments', (req, res) => {
-  try {
-    const { date, customerName } = req.body;
-    const novoAgendamento = { id: Date.now().toString(), ...req.body, createdAt: new Date() };
-    database.appointments.push(novoAgendamento);
-    registrarLog("AGENDA", `Agendado: ${customerName}`);
-    res.status(201).json({ success: true, data: novoAgendamento });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
-});
-
-app.get('/api/v1/sales', (req, res) => res.json({ success: true, data: database.sales }));
-
-app.post('/api/v1/sales', (req, res) => {
-  try {
-    const { items, customerName, totalValue, valorEntrada, costValue } = req.body;
-    const saleId = `VEND-${Date.now()}`;
-    
-    items.forEach((item: any) => {
-      const prod = database.products.find(p => p.id === item.productId);
-      if (prod) prod.baixarEstoque(item.quantity);
-    });
-
-    const novaVenda = { 
-      id: saleId, ...req.body, 
-      lucroBruto: Number(totalValue) - (Number(costValue) || 0),
-      createdAt: new Date() 
-    };
-    database.sales.push(novaVenda);
-
-    if (Number(valorEntrada) > 0) {
-      database.bills.push({
-        id: `rev-ent-${Date.now()}`, originId: saleId,
-        description: `Entrada: ${customerName}`, value: Number(valorEntrada),
-        category: 'SERVIÇO', type: 'receita', status: 'PAGO', dueDate: new Date().toISOString().split('T')[0], createdAt: new Date()
-      });
-    }
-
-    registrarLog("VENDA", `Venda para ${customerName} concluída.`);
-    res.status(201).json({ success: true, data: novaVenda });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
-});
-
-app.get('/api/v1/finance/bills', (req, res) => res.json({ success: true, data: database.bills }));
-
-app.patch('/api/v1/finance/bills/:id/pay', (req, res) => {
-  const { id } = req.params;
-  const bill = database.bills.find(b => b.id === id);
-  if (bill) {
-    bill.status = 'PAGO';
-    registrarLog("FINANCEIRO", `Pago: ${bill.description}`);
-    res.json({ success: true, data: bill });
-  } else res.status(404).json({ success: false });
-});
-
-app.get('/api/v1/logs', (req, res) => res.json({ success: true, data: database.logs }));
-
-app.listen(port, () => {
-  console.log(`🚀 Motor do Ateliê 3.0 ON em http://localhost:${port}`);
-});
+app.use('/api/v1', router);
+app.listen(PORT, () => console.log(`🚀 SISTEMA ATELIER INTEGRADO NA PORTA ${PORT}`));

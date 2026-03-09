@@ -1,220 +1,241 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { 
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, 
-  Clock, X, Heart, CircleDollarSign, Loader2
+  Clock, X, Heart, CircleDollarSign, Loader2, PackageOpen, Undo2, Trash2, Edit3,
+  Search, MessageCircle, User, ExternalLink, CalendarDays
 } from 'lucide-react'
 import api from '../services/api'
 
-// Configuração de Cores e Tipos (Centralizado)
 const EVENT_TYPES = {
-  NOIVA: { 
-    label: 'Prova de Noiva', color: 'bg-blue-600', light: 'bg-blue-50', 
-    text: 'text-blue-700', border: 'border-blue-600', icon: <Heart size={10}/> 
-  },
-  ORCAMENTO: { 
-    label: 'Orçamento', color: 'bg-amber-500', light: 'bg-amber-50', 
-    text: 'text-amber-700', border: 'border-amber-500', icon: <CircleDollarSign size={10}/> 
-  },
-  CASAMENTO: { 
-    label: 'GRANDE DIA (CASAMENTO)', 
-    color: 'bg-rose-500', 
-    light: 'bg-rose-50', 
-    text: 'text-rose-700', 
-    border: 'border-rose-500', 
-    icon: <span className="text-[12px]">💍</span> 
-  }
+  NOIVA: { label: 'Prova de Noiva', color: 'bg-blue-600', light: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-600', icon: <Heart size={14}/> },
+  ORCAMENTO: { label: 'Orçamento/Confecção', color: 'bg-amber-500', light: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-500', icon: <CircleDollarSign size={14}/> },
+  RETIRADA: { label: 'Retirada de Aluguel', color: 'bg-emerald-600', light: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-600', icon: <PackageOpen size={14}/> },
+  DEVOLUCAO: { label: 'Devolução de Aluguel', color: 'bg-purple-600', light: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-600', icon: <Undo2 size={14}/> },
+  CASAMENTO: { label: 'GRANDE DIA', color: 'bg-rose-500', light: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-500', icon: <span className="text-xs">💍</span> }
 }
 
 export function Calendario() {
-  const [view, setView] = useState('day') 
+  const [view, setView] = useState('day')
   const [appointments, setAppointments] = useState([])
+  const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [selectedEvent, setSelectedEvent] = useState(null) // Para o Card de Resumo
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [editingId, setEditingId] = useState(null)
+  
   const [formData, setFormData] = useState({
-    customerName: '', service: '', date: '', time: '09:00', type: 'NOIVA'
+    customerName: '', service: '', date: '', time: '09:00', type: 'NOIVA', duration: 60, customerId: ''
   })
 
-  const hours = Array.from({ length: 12 }, (_, i) => `${(i + 8).toString().padStart(2, '0')}:00`)
+  const hours = useMemo(() => Array.from({ length: 12 }, (_, i) => `${(i + 8).toString().padStart(2, '0')}:00`), [])
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await api.get('/appointments')
-      setAppointments(res.data.data || [])
-    } catch (err) { 
-      console.error("Erro ao buscar agenda:", err) 
-    } finally {
-      setLoading(false)
-    }
+      const [appRes, custRes] = await Promise.all([
+        api.get('/appointments'),
+        api.get('/crm/customers')
+      ])
+      
+      const manualApps = appRes.data.data || appRes.data || []
+      const allCustomers = custRes.data.data || custRes.data || []
+      setCustomers(allCustomers)
+
+      const crmEvents = []
+      allCustomers.forEach(noiva => {
+        if (noiva.eventDate) {
+          crmEvents.push({
+            id: `wedding-${noiva.id}`,
+            customerName: noiva.name,
+            date: noiva.eventDate.split('T')[0],
+            time: noiva.weddingTime || '16:00',
+            type: 'CASAMENTO',
+            service: 'Cerimônia de Casamento',
+            isSystem: true,
+            customerId: noiva.id
+          })
+        }
+        if (noiva.trials && Array.isArray(noiva.trials)) {
+          noiva.trials.forEach((trialDate, idx) => {
+            if(trialDate) {
+              crmEvents.push({
+                id: `trial-${noiva.id}-${idx}`,
+                customerName: noiva.name,
+                date: trialDate.split('T')[0],
+                time: '09:00',
+                type: 'NOIVA',
+                service: `Prova nº ${idx + 1}`,
+                isSystem: true,
+                customerId: noiva.id
+              })
+            }
+          })
+        }
+      })
+
+      setAppointments([...manualApps, ...crmEvents])
+    } catch (err) { console.error("Erro ao buscar dados da agenda:", err) }
+    finally { setLoading(false) }
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Formata data para YYYY-MM-DD (Evita erros de fuso horário)
   const formatISO = (date) => {
-    const d = new Date(date)
-    return d.toLocaleDateString('sv-SE') // Retorna YYYY-MM-DD de forma segura
+    const d = new Date(date);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().split('T')[0];
   }
 
-  const navigate = (direction) => {
-    const newDate = new Date(currentDate)
-    if (view === 'day') newDate.setDate(currentDate.getDate() + direction)
-    if (view === 'week') newDate.setDate(currentDate.getDate() + (direction * 7))
-    if (view === 'month') newDate.setMonth(currentDate.getMonth() + direction)
-    setCurrentDate(newDate)
+  const handleNavigate = (direction) => {
+    const newDate = new Date(currentDate);
+    if (view === 'month') newDate.setMonth(currentDate.getMonth() + direction);
+    else if (view === 'week') newDate.setDate(currentDate.getDate() + (direction * 7));
+    else newDate.setDate(currentDate.getDate() + direction);
+    setCurrentDate(newDate);
   }
 
-  // --- LÓGICA DE VISÃO DIÁRIA (ATUALIZADA) ---
-  const renderDayView = () => {
-    const dateStr = formatISO(currentDate);
-    const casamentosHoje = appointments.filter(a => a.date === dateStr && a.type === 'CASAMENTO');
+  const handleOpenEvent = (app) => {
+    setSelectedEvent(app);
+  }
+
+  const handleEdit = (app) => {
+    if(app.isSystem) return alert("Este evento é gerado automaticamente pelo CRM.");
+    setEditingId(app.id)
+    setFormData({
+      customerName: app.customerName,
+      service: app.service || app.type,
+      date: app.date,
+      time: app.time,
+      type: app.type,
+      duration: 60,
+      customerId: app.customerId || ''
+    })
+    setSelectedEvent(null);
+    setShowModal(true)
+  }
+
+  const handleDelete = async (id, name) => {
+    if (window.confirm(`Deseja cancelar o agendamento de "${name}"?`)) {
+      try {
+        await api.delete(`/appointments/${id}`)
+        setSelectedEvent(null);
+        fetchData()
+      } catch (err) { alert("Erro ao cancelar.") }
+    }
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = { ...formData };
+      if (editingId) await api.put(`/appointments/${editingId}`, payload);
+      else await api.post('/appointments', payload);
+      setShowModal(false);
+      setEditingId(null);
+      fetchData();
+      setFormData({ customerName: '', service: '', date: '', time: '09:00', type: 'NOIVA', duration: 60, customerId: '' });
+    } catch(err) { alert("Erro ao salvar.") }
+  }
+
+  // --- RENDERS ---
+  const renderMonthView = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i));
 
     return (
-      <div className="flex-1 overflow-y-auto bg-white rounded-xl border flex flex-col">
-        {/* CABEÇALHO DO DIA SELECIONADO */}
-        <div className="p-4 border-b bg-secondary-50/50 flex justify-between items-center sticky top-0 z-10 backdrop-blur-md">
-          <div>
-            <h2 className="text-sm font-black text-secondary-900 uppercase tracking-tight">
-              {currentDate.toLocaleDateString('pt-BR', { weekday: 'long' })}
-            </h2>
-            <p className="text-[11px] font-bold text-indigo-600 uppercase">
-              {currentDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
-            </p>
-          </div>
-          {dateStr === formatISO(new Date()) && (
-            <span className="bg-indigo-600 text-white text-[9px] font-black px-2 py-1 rounded-full">HOJE</span>
-          )}
-        </div>
-
-        {/* HEADER DE CASAMENTOS */}
-        {casamentosHoje.length > 0 && (
-          <div className="bg-rose-50 p-3 border-b border-rose-100 space-y-2">
-            {casamentosHoje.map(ev => (
-              <div key={ev.id} className="bg-white border-l-4 border-rose-500 p-3 rounded-r-lg shadow-sm flex items-center gap-3">
-                <span className="text-xl">💍</span>
-                <div>
-                  <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest">Casamento do Dia</p>
-                  <p className="font-bold text-secondary-900">{ev.customerName}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* GRADE DE HORÁRIOS */}
-        {hours.map(hour => {
-          const app = appointments.find(a => 
-            a.date === dateStr && 
-            a.time?.startsWith(hour.split(':')[0]) && 
-            a.type !== 'CASAMENTO'
-          );
-          const style = app ? (EVENT_TYPES[app.type] || EVENT_TYPES.NOIVA) : null;
-
+      <div className="flex-1 bg-white rounded-xl border grid grid-cols-7 overflow-hidden">
+        {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
+          <div key={d} className="p-2 border-b bg-secondary-50 text-[10px] font-black uppercase text-center text-secondary-400">{d}</div>
+        ))}
+        {days.map((day, idx) => {
+          if (!day) return <div key={`empty-${idx}`} className="border-b border-r bg-secondary-50/20" />;
+          const dateStr = formatISO(day);
+          const dayApps = appointments.filter(a => a.date === dateStr);
+          const isToday = formatISO(new Date()) === dateStr;
           return (
-            <div key={hour} className="grid grid-cols-[80px_1fr] border-b min-h-[70px] group">
-              <div className="p-4 border-r text-xs text-secondary-400 font-bold text-center bg-secondary-50/30">{hour}</div>
-              <div className="p-2 relative">
-                {app ? (
-                  <div className={`${style.light} border-l-4 ${style.border} p-3 rounded-lg shadow-sm`}>
-                    <p className="font-bold text-secondary-900 text-sm">{app.customerName}</p>
-                    <p className={`text-[10px] ${style.text} flex items-center gap-1 font-medium`}>
-                      {style.icon} {app.service} • {app.time}
-                    </p>
-                  </div>
-                ) : (
-                  <button onClick={() => { 
-                    setFormData(prev => ({...prev, date: dateStr, time: hour})); 
-                    setShowModal(true); 
-                  }} className="w-full h-full opacity-0 group-hover:opacity-100 border-2 border-dashed border-secondary-100 rounded-xl transition-all hover:bg-secondary-50/50"></button>
-                )}
+            <div key={dateStr} onClick={() => { setEditingId(null); setFormData({...formData, date: dateStr}); setShowModal(true); }}
+              className="border-b border-r p-2 min-h-[100px] hover:bg-indigo-50/20 transition-all cursor-pointer group">
+              <span className={`text-xs font-bold ${isToday ? 'bg-indigo-600 text-white px-2 py-1 rounded-full' : 'text-secondary-600'}`}>{day.getDate()}</span>
+              <div className="mt-1 space-y-1">
+                {dayApps.slice(0, 3).map((app, i) => (
+                  <div key={i} onClick={(e) => { e.stopPropagation(); handleOpenEvent(app); }} 
+                    className={`${EVENT_TYPES[app.type]?.color} h-1.5 rounded-full w-full mb-0.5`} />
+                ))}
               </div>
             </div>
-          )
+          );
+        })}
+      </div>
+    );
+  }
+
+  const renderWeekView = () => {
+    const startOfWeek = new Date(currentDate);
+    startOfWeek.setDate(currentDate.getDate() - currentDate.getDay());
+    return (
+      <div className="flex-1 bg-white rounded-xl border grid grid-cols-7 overflow-hidden">
+        {Array.from({ length: 7 }).map((_, i) => {
+          const d = new Date(startOfWeek); d.setDate(startOfWeek.getDate() + i);
+          const dateStr = formatISO(d);
+          const dayApps = appointments.filter(a => a.date === dateStr);
+          return (
+            <div key={i} className="border-r last:border-r-0 flex flex-col group">
+              <div className="p-3 border-b text-center bg-secondary-50/50">
+                <p className="text-[9px] font-black uppercase opacity-70">{d.toLocaleDateString('pt-BR', { weekday: 'short' })}</p>
+                <p className="text-sm font-black">{d.getDate()}</p>
+              </div>
+              <div className="flex-1 p-2 space-y-2 overflow-y-auto min-h-[400px]">
+                {dayApps.map((app, idx) => (
+                  <div key={idx} onClick={(e) => { e.stopPropagation(); handleOpenEvent(app); }} 
+                    className={`${EVENT_TYPES[app.type]?.light} p-2 rounded border-l-2 ${EVENT_TYPES[app.type]?.border} cursor-pointer hover:brightness-95 transition-all shadow-sm`}>
+                    <p className="text-[9px] font-black text-secondary-900 truncate uppercase">{app.customerName}</p>
+                    <p className="text-[8px] opacity-70 font-bold">{app.time}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
         })}
       </div>
     )
   }
 
-  const renderWeekView = () => {
-    const start = new Date(currentDate)
-    start.setDate(currentDate.getDate() - currentDate.getDay())
-    const days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(start); d.setDate(start.getDate() + i); return d;
-    })
-
+  const renderDayView = () => {
+    const dateStr = formatISO(currentDate);
     return (
-      <div className="flex-1 bg-white rounded-xl border overflow-hidden flex flex-col">
-        <div className="grid grid-cols-[80px_repeat(7,1fr)] border-b bg-secondary-50">
-          <div className="p-3 border-r text-[10px] font-black text-secondary-400 uppercase">Hora</div>
-          {days.map(d => (
-            <div key={d.toString()} className={`p-3 text-center border-r last:border-0 ${formatISO(d) === formatISO(new Date()) ? 'bg-indigo-50 text-indigo-600' : 'text-secondary-600'}`}>
-              <p className="text-[10px] font-bold uppercase">{d.toLocaleDateString('pt-BR', { weekday: 'short' })}</p>
-              <p className="text-sm font-black">{d.getDate()}</p>
-            </div>
-          ))}
+      <div className="flex-1 overflow-y-auto bg-white rounded-xl border flex flex-col custom-scrollbar">
+        <div className="p-4 border-b bg-secondary-50/50 sticky top-0 z-10 backdrop-blur-md">
+          <h2 className="text-sm font-black text-secondary-900 uppercase">
+            {currentDate.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+          </h2>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {hours.map(hour => (
-            <div key={hour} className="grid grid-cols-[80px_repeat(7,1fr)] border-b min-h-[80px]">
-              <div className="p-2 border-r text-[10px] text-secondary-400 font-bold text-center bg-secondary-50/10">{hour}</div>
-              {days.map(d => {
-                const dateStr = formatISO(d)
-                const app = appointments.find(a => a.date === dateStr && a.time?.startsWith(hour.split(':')[0]))
-                const style = app ? (EVENT_TYPES[app.type] || EVENT_TYPES.NOIVA) : null
-                
-                return (
-                  <div key={d.toString()} className="p-1 border-r last:border-0 relative group">
-                    {app ? (
-                      <div className={`${style.color} text-white p-2 rounded-lg text-[10px] shadow-md h-full flex flex-col justify-center`}>
-                        <p className="font-bold leading-tight">{app.type === 'CASAMENTO' ? '💍 ' : ''}{app.customerName}</p>
-                        <p className="opacity-80 text-[9px] truncate">{app.service}</p>
-                      </div>
-                    ) : (
-                      <button onClick={() => { setFormData({...formData, date: dateStr, time: hour}); setShowModal(true); }}
-                        className="w-full h-full opacity-0 group-hover:opacity-100 hover:bg-secondary-50 rounded transition-all"></button>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  const renderMonthView = () => {
-    const startMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
-    const endMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
-    const days = []
-    for (let i = startMonth.getDay(); i > 0; i--) days.push(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1 - i))
-    for (let i = 1; i <= endMonth.getDate(); i++) days.push(new Date(currentDate.getFullYear(), currentDate.getMonth(), i))
-    
-    return (
-      <div className="flex-1 bg-white rounded-xl border grid grid-cols-7 auto-rows-fr overflow-hidden">
-        {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(wd => (
-          <div key={wd} className="p-2 bg-secondary-50 border-b border-r text-[10px] font-black text-secondary-400 uppercase text-center">{wd}</div>
-        ))}
-        {days.map((d, i) => {
-          const dateStr = formatISO(d)
-          const dayApps = appointments
-            .filter(a => a.date === dateStr)
-            .sort((a, b) => (a.type === 'CASAMENTO' ? -1 : 1));
-
-          const isToday = dateStr === formatISO(new Date())
+        {hours.map(hour => {
+          const appsInHour = appointments.filter(a => a.date === dateStr && a.time?.startsWith(hour.split(':')[0]));
           return (
-            <div key={i} className={`p-2 border-b border-r min-h-[110px] ${d.getMonth() !== currentDate.getMonth() ? 'opacity-30' : ''}`}>
-              <span className={`text-[11px] font-bold ${isToday ? 'bg-indigo-600 text-white px-2 py-0.5 rounded-full' : 'text-secondary-400'}`}>{d.getDate()}</span>
-              <div className="mt-1 space-y-1">
-                {dayApps.map((a, idx) => {
-                  const style = EVENT_TYPES[a.type] || EVENT_TYPES.NOIVA
-                  return (
-                    <div key={idx} className={`${style.color} text-white px-1.5 py-0.5 rounded text-[9px] font-bold truncate flex items-center gap-1 shadow-sm`}>
-                      {a.type === 'CASAMENTO' ? '💍' : a.time?.substring(0, 5)} {a.customerName}
+            <div key={hour} className="grid grid-cols-[80px_1fr] border-b min-h-[80px] group">
+              <div className="p-4 border-r text-[10px] text-secondary-400 font-bold text-center bg-secondary-50/30 flex items-center justify-center">{hour}</div>
+              <div className="p-2 flex flex-col gap-2 relative">
+                {appsInHour.map((app, index) => (
+                  <div key={index} 
+                    onClick={() => handleOpenEvent(app)}
+                    className={`${EVENT_TYPES[app.type]?.light} border-l-4 ${EVENT_TYPES[app.type]?.border} p-3 rounded-xl shadow-sm flex justify-between items-center cursor-pointer hover:scale-[1.01] transition-transform`}>
+                    <div className="flex-1">
+                      <p className="font-bold text-secondary-900 text-sm flex items-center gap-2 uppercase">
+                        {app.customerName} {app.isSystem && <span className="text-[7px] border px-1 rounded bg-white/50">SISTEMA</span>}
+                      </p>
+                      <p className={`text-[10px] ${EVENT_TYPES[app.type]?.text} flex items-center gap-1 font-black mt-1 uppercase italic`}>
+                        {EVENT_TYPES[app.type]?.icon} {app.service}
+                      </p>
                     </div>
-                  )
-                })}
+                    <div className="text-[10px] font-black opacity-40 italic">{app.time}</div>
+                  </div>
+                ))}
               </div>
             </div>
           )
@@ -224,107 +245,179 @@ export function Calendario() {
   }
 
   return (
-    <div className="h-[calc(100vh-120px)] flex flex-col space-y-4">
-      {/* HEADER DA AGENDA */}
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
+    <div className="h-[calc(100vh-140px)] flex flex-col space-y-4">
+      {/* HEADER */}
+      <div className="flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm">
         <div className="flex items-center gap-6">
           <h1 className="text-xl font-black text-secondary-900 flex items-center gap-2">
-            <CalendarIcon className="text-indigo-600" size={20}/> Agenda do Ateliê
+            <CalendarIcon className="text-indigo-600" size={22}/> Agenda Ateliê
           </h1>
-          <div className="flex items-center gap-2 bg-secondary-50 p-1 rounded-lg border">
-            <button onClick={() => navigate(-1)} className="p-1 hover:bg-white hover:shadow-sm rounded-md transition-all"><ChevronLeft size={18}/></button>
-            <button onClick={() => setCurrentDate(new Date())} className="px-3 py-1 text-xs font-bold hover:text-indigo-600">Hoje</button>
-            <button onClick={() => navigate(1)} className="p-1 hover:bg-white hover:shadow-sm rounded-md transition-all"><ChevronRight size={18}/></button>
+          <div className="flex items-center gap-2 bg-secondary-50 p-1.5 rounded-xl border">
+            <button onClick={() => handleNavigate(-1)} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronLeft size={20}/></button>
+            <button onClick={() => setCurrentDate(new Date())} className="px-4 py-1.5 text-[10px] font-black uppercase">Hoje</button>
+            <button onClick={() => handleNavigate(1)} className="p-1.5 hover:bg-white rounded-lg transition-all"><ChevronRight size={20}/></button>
           </div>
-          <span className="text-sm font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100">
+          <span className="text-sm font-black text-secondary-600 uppercase italic">
             {currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
           </span>
         </div>
-
         <div className="flex items-center gap-4">
           <div className="flex bg-secondary-100 p-1 rounded-xl border">
-            {['day', 'week', 'month'].map(v => (
-              <button key={v} onClick={() => setView(v)} 
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${view === v ? 'bg-white shadow-sm text-indigo-600' : 'text-secondary-500'}`}>
-                {v === 'day' ? 'Dia' : v === 'week' ? 'Semana' : 'Mês'}
+            {[{ id: 'day', label: 'Dia' }, { id: 'week', label: 'Semana' }, { id: 'month', label: 'Mês' }].map(v => (
+              <button key={v.id} onClick={() => setView(v.id)} className={`px-5 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${view === v.id ? 'bg-white shadow-md text-indigo-600' : 'text-secondary-500 hover:text-secondary-700'}`}>
+                {v.label}
               </button>
             ))}
           </div>
-          <button onClick={() => { setFormData({...formData, date: formatISO(currentDate)}); setShowModal(true); }}
-            className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all">
-            <Plus size={16}/> Novo Horário
+          <button onClick={() => { setEditingId(null); setFormData({...formData, date: formatISO(currentDate)}); setShowModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-700 shadow-xl transition-all active:scale-95">
+            <Plus size={18}/> Novo Agendamento
           </button>
         </div>
       </div>
 
-      {/* ÁREA DO CALENDÁRIO */}
-      {loading ? (
-        <div className="flex-1 bg-white rounded-xl border flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" size={40}/></div>
-      ) : (
-        <>
-          {view === 'day' && renderDayView()}
-          {view === 'week' && renderWeekView()}
-          {view === 'month' && renderMonthView()}
-        </>
-      )}
+      <div className="flex-1 flex flex-col min-h-0">
+        {loading ? (
+          <div className="flex-1 bg-white rounded-2xl border flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" size={48}/></div>
+        ) : (
+          view === 'month' ? renderMonthView() : view === 'week' ? renderWeekView() : renderDayView()
+        )}
+      </div>
 
-      {/* MODAL DE AGENDAMENTO */}
-      {showModal && (
-        <div className="fixed inset-0 bg-secondary-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className={`p-6 flex justify-between items-center text-white ${EVENT_TYPES[formData.type].color} transition-colors duration-500`}>
-              <div>
-                <h2 className="text-lg font-black uppercase tracking-tighter">Agendar no Ateliê</h2>
-                <p className="text-[10px] opacity-80 font-bold uppercase tracking-widest">{EVENT_TYPES[formData.type].label}</p>
+      {/* MODAL DE RESUMO (QUICK VIEW) */}
+      {selectedEvent && (
+        <div className="fixed inset-0 bg-secondary-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-sm shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className={`p-8 ${EVENT_TYPES[selectedEvent.type]?.color} text-white relative`}>
+              <button onClick={() => setSelectedEvent(null)} className="absolute top-6 right-6 p-2 bg-black/10 rounded-full hover:bg-black/20 transition-all">
+                <X size={18}/>
+              </button>
+              <div className="bg-white/20 w-fit p-3 rounded-2xl mb-4">
+                {EVENT_TYPES[selectedEvent.type]?.icon}
               </div>
-              <button onClick={() => setShowModal(false)} className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition-all"><X size={20}/></button>
+              <h3 className="text-[10px] font-black uppercase tracking-widest opacity-80">{EVENT_TYPES[selectedEvent.type]?.label}</h3>
+              <h2 className="text-2xl font-black uppercase leading-tight mt-1 italic">{selectedEvent.customerName}</h2>
             </div>
             
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                await api.post('/appointments', formData);
-                setShowModal(false);
-                fetchData();
-              } catch(err) { alert("Erro ao salvar agendamento") }
-            }} className="p-8 space-y-5">
-              
-              <div className="grid grid-cols-2 gap-2 p-1.5 bg-secondary-50 rounded-2xl border">
-                <button type="button" onClick={() => setFormData({...formData, type: 'NOIVA'})}
-                  className={`py-3 rounded-xl text-[10px] font-black transition-all ${formData.type === 'NOIVA' ? 'bg-blue-600 text-white shadow-lg' : 'text-secondary-400 hover:text-secondary-600'}`}>
-                  PROVA DE NOIVA
-                </button>
-                <button type="button" onClick={() => setFormData({...formData, type: 'ORCAMENTO'})}
-                  className={`py-3 rounded-xl text-[10px] font-black transition-all ${formData.type === 'ORCAMENTO' ? 'bg-amber-500 text-white shadow-lg' : 'text-secondary-400 hover:text-secondary-600'}`}>
-                  ORÇAMENTO
-                </button>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Nome da Cliente</label>
-                <input required className="w-full p-4 border rounded-2xl outline-none focus:border-indigo-500 transition-all text-sm font-medium" 
-                  placeholder="Ex: Noiva Marina Silva" value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Observações</label>
-                <input required className="w-full p-4 border rounded-2xl outline-none focus:border-indigo-500 transition-all text-sm" 
-                  placeholder="Ex: Ajuste de barra" value={formData.service} onChange={e => setFormData({...formData, service: e.target.value})} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Data</label>
-                  <input type="date" required className="w-full p-4 border rounded-2xl outline-none text-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+            <div className="p-8 space-y-6">
+              <div className="space-y-4">
+                <div className="flex items-center gap-4 text-secondary-600">
+                  <div className="bg-secondary-50 p-3 rounded-xl"><CalendarDays size={18}/></div>
+                  <div>
+                    <p className="text-[9px] font-black uppercase opacity-50">Data do Evento</p>
+                    <p className="text-sm font-bold">{new Date(selectedEvent.date + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-secondary-400 uppercase ml-1">Horário</label>
-                  <input type="time" required className="w-full p-4 border rounded-2xl outline-none text-sm" value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
+                <div className="flex items-center gap-4 text-secondary-600">
+                  <div className="bg-secondary-50 p-3 rounded-xl"><Clock size={18}/></div>
+                  <div>
+                    <p className="text-[9px] font-black uppercase opacity-50">Horário Agendado</p>
+                    <p className="text-sm font-bold">{selectedEvent.time}h</p>
+                  </div>
+                </div>
+                {selectedEvent.service && (
+                   <div className="flex items-center gap-4 text-secondary-600">
+                   <div className="bg-secondary-50 p-3 rounded-xl"><Search size={18}/></div>
+                   <div>
+                     <p className="text-[9px] font-black uppercase opacity-50">Serviço/Detalhes</p>
+                     <p className="text-sm font-bold">{selectedEvent.service}</p>
+                   </div>
+                 </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 pt-4">
+                {selectedEvent.customerId && (
+                   <button 
+                    onClick={() => window.location.href = `/crm?id=${selectedEvent.customerId}`}
+                    className="w-full py-4 bg-secondary-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-black transition-all">
+                    <User size={14}/> Abrir Ficha da Noiva
+                  </button>
+                )}
+                
+                {!selectedEvent.isSystem && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => handleEdit(selectedEvent)} className="py-4 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-indigo-100 transition-all">
+                      <Edit3 size={14}/> Editar
+                    </button>
+                    <button onClick={() => handleDelete(selectedEvent.id, selectedEvent.customerName)} className="py-4 bg-rose-50 text-rose-600 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-rose-100 transition-all">
+                      <Trash2 size={14}/> Excluir
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE FORMULÁRIO */}
+      {showModal && (
+        <div className="fixed inset-0 bg-secondary-900/70 backdrop-blur-md z-[70] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden">
+            <div className={`p-8 flex justify-between items-center text-white ${EVENT_TYPES[formData.type]?.color || 'bg-indigo-600'}`}>
+              <div>
+                <h3 className="text-[9px] font-black uppercase tracking-[0.2em] opacity-80">Agendamento</h3>
+                <h2 className="text-xl font-black uppercase italic">{editingId ? 'Editar Reserva' : 'Nova Reserva'}</h2>
+              </div>
+              <button onClick={() => setShowModal(false)} className="bg-black/10 p-2.5 rounded-full hover:bg-black/20"><X size={20}/></button>
+            </div>
+            
+            <form onSubmit={handleSubmit} className="p-8 space-y-6">
+              <div className="grid grid-cols-5 gap-2 p-1.5 bg-secondary-50 rounded-2xl border">
+                {Object.keys(EVENT_TYPES).map(type => (
+                  <button key={type} type="button" title={EVENT_TYPES[type].label} onClick={() => setFormData({...formData, type})}
+                    className={`py-3 rounded-xl flex items-center justify-center transition-all ${formData.type === type ? `${EVENT_TYPES[type].color} text-white shadow-lg` : 'text-secondary-400 hover:bg-white'}`}>
+                    {EVENT_TYPES[type].icon}
+                  </button>
+                ))}
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-secondary-400 uppercase ml-2">Vincular Cliente CRM</label>
+                  <select 
+                    className="w-full p-4 bg-secondary-50 border-2 border-transparent focus:border-indigo-100 rounded-2xl outline-none text-sm font-bold appearance-none transition-all"
+                    value={formData.customerId}
+                    onChange={(e) => {
+                      const selected = customers.find(c => c.id === e.target.value);
+                      setFormData({...formData, customerId: e.target.value, customerName: selected ? selected.name : ''});
+                    }}
+                  >
+                    <option value="">-- Selecione uma Noiva --</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+
+                {!formData.customerId && (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-secondary-400 uppercase ml-2">Nome do Cliente</label>
+                    <input required placeholder="Digite o nome..." className="w-full p-4 bg-secondary-50 border-2 border-transparent focus:border-indigo-100 rounded-2xl outline-none text-sm font-bold transition-all" 
+                      value={formData.customerName} onChange={e => setFormData({...formData, customerName: e.target.value})} />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-secondary-400 uppercase ml-2">Data</label>
+                    <input type="date" required className="w-full p-4 bg-secondary-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-indigo-100" 
+                      value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-secondary-400 uppercase ml-2">Hora</label>
+                    <input type="time" required className="w-full p-4 bg-secondary-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-indigo-100" 
+                      value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-secondary-400 uppercase ml-2">Serviço/Observação</label>
+                    <input placeholder="Ex: Ajuste final, Primeira prova..." className="w-full p-4 bg-secondary-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-indigo-100" 
+                      value={formData.service} onChange={e => setFormData({...formData, service: e.target.value})} />
                 </div>
               </div>
 
-              <button className={`w-full py-5 rounded-2xl font-black text-xs uppercase tracking-widest text-white shadow-xl transition-all duration-300 transform hover:-translate-y-1 ${EVENT_TYPES[formData.type].color}`}>
-                Confirmar na Agenda
+              <button type="submit" className={`w-full py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] text-white shadow-2xl transition-all active:scale-95 ${EVENT_TYPES[formData.type]?.color || 'bg-indigo-600'} hover:brightness-110`}>
+                {editingId ? 'Salvar Alterações' : 'Confirmar Agendamento'}
               </button>
             </form>
           </div>
