@@ -20,7 +20,7 @@ export function Calendario() {
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [selectedEvent, setSelectedEvent] = useState(null) // Para o Card de Resumo
+  const [selectedEvent, setSelectedEvent] = useState(null) 
   const [currentDate, setCurrentDate] = useState(new Date())
   const [editingId, setEditingId] = useState(null)
   
@@ -363,13 +363,22 @@ export function Calendario() {
             </div>
             
             <form onSubmit={handleSubmit} className="p-8 space-y-6">
-              <div className="grid grid-cols-5 gap-2 p-1.5 bg-secondary-50 rounded-2xl border">
-                {Object.keys(EVENT_TYPES).map(type => (
-                  <button key={type} type="button" title={EVENT_TYPES[type].label} onClick={() => setFormData({...formData, type})}
-                    className={`py-3 rounded-xl flex items-center justify-center transition-all ${formData.type === type ? `${EVENT_TYPES[type].color} text-white shadow-lg` : 'text-secondary-400 hover:bg-white'}`}>
-                    {EVENT_TYPES[type].icon}
-                  </button>
-                ))}
+              {/* SELETOR DE TIPOS COM LEGENDA MELHORADA */}
+              <div className="space-y-3">
+                <div className="grid grid-cols-5 gap-2 p-1.5 bg-secondary-50 rounded-2xl border">
+                  {Object.keys(EVENT_TYPES).map(type => (
+                    <button key={type} type="button" title={EVENT_TYPES[type].label} onClick={() => setFormData({...formData, type})}
+                      className={`py-3 rounded-xl flex items-center justify-center transition-all ${formData.type === type ? `${EVENT_TYPES[type].color} text-white shadow-lg` : 'text-secondary-400 hover:bg-white'}`}>
+                      {EVENT_TYPES[type].icon}
+                    </button>
+                  ))}
+                </div>
+                {/* LEGENDA DINÂMICA DO TIPO SELECIONADO */}
+                <div className={`text-center py-1.5 px-4 rounded-lg border-2 border-dashed ${EVENT_TYPES[formData.type]?.border} ${EVENT_TYPES[formData.type]?.light} transition-all`}>
+                   <p className={`text-[10px] font-black uppercase tracking-widest ${EVENT_TYPES[formData.type]?.text}`}>
+                      {EVENT_TYPES[formData.type]?.label}
+                   </p>
+                </div>
               </div>
 
               <div className="space-y-4">

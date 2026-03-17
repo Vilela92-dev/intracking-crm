@@ -6,72 +6,52 @@ import { Layout } from './components/Layout'
 // Importação das Páginas
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
-import { CRM } from './pages/CRM'
+import CRM from './pages/CRM' 
 import { Vendas } from './pages/Vendas'
 import Aluguel from './pages/Aluguel' 
 import { Relatorios } from './pages/Relatorios'
-import { NotFound } from './pages/NotFound'
 import { Estoque } from './pages/Estoque'
 import { Fornecedores } from './pages/Fornecedores'
 import { Financeiro } from './pages/Financeiro'
 import { Calendario } from './pages/Calendario'
-import { Orcamentos } from './pages/Orcamentos' // <--- ADICIONADO: Importação da nova página
+import { Orcamentos } from './pages/Orcamentos'
+import { Settings } from './pages/Settings'
+import { NotFound } from './pages/NotFound'
 
+/**
+ * APP ATELIÊ PRO - VERSÃO COMPATÍVEL COM LAYOUT {CHILDREN}
+ * Corrigido para sincronizar as rotas do Dashboard e Menus.
+ */
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* Rota Pública de Acesso */}
+          {/* Rota Pública */}
           <Route path="/login" element={<Login />} />
 
-          {/* Rotas Protegidas com Layout Integrado */}
-          <Route 
-            path="/dashboard" 
-            element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} 
-          />
-          <Route 
-            path="/crm" 
-            element={<ProtectedRoute><Layout><CRM /></Layout></ProtectedRoute>} 
-          />
-          <Route 
-            path="/calendario" 
-            element={<ProtectedRoute><Layout><Calendario /></Layout></ProtectedRoute>} 
-          />
+          {/* Rotas Protegidas - Usando o padrão <Layout><Componente /></Layout> */}
+          <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
+          <Route path="/crm" element={<ProtectedRoute><Layout><CRM /></Layout></ProtectedRoute>} />
           
-          {/* Módulos de Operação (Vendas, Locação e Orçamentos) */}
-          <Route 
-            path="/vendas" 
-            element={<ProtectedRoute><Layout><Vendas /></Layout></ProtectedRoute>} 
-          />
-          <Route 
-            path="/orcamentos" // <--- ADICIONADO: Nova rota para Orçamentos
-            element={<ProtectedRoute><Layout><Orcamentos /></Layout></ProtectedRoute>} 
-          />
-          <Route 
-            path="/aluguel" 
-            element={<ProtectedRoute><Layout><Aluguel /></Layout></ProtectedRoute>} 
-          />
-
-          {/* Gestão de Insumos e Financeiro */}
-          <Route 
-            path="/estoque" 
-            element={<ProtectedRoute><Layout><Estoque /></Layout></ProtectedRoute>} 
-          />
-          <Route 
-            path="/fornecedores" 
-            element={<ProtectedRoute><Layout><Fornecedores /></Layout></ProtectedRoute>} 
-          />
-          <Route 
-            path="/financeiro" 
-            element={<ProtectedRoute><Layout><Financeiro /></Layout></ProtectedRoute>} 
-          />
-          <Route 
-            path="/relatorios" 
-            element={<ProtectedRoute><Layout><Relatorios /></Layout></ProtectedRoute>} 
-          />
+          {/* Sincronização: Agenda e Calendário */}
+          <Route path="/agenda" element={<ProtectedRoute><Layout><Calendario /></Layout></ProtectedRoute>} />
+          <Route path="/calendario" element={<ProtectedRoute><Layout><Calendario /></Layout></ProtectedRoute>} />
           
-          {/* Redirecionamento Inicial e Página Não Encontrada */}
+          <Route path="/vendas" element={<ProtectedRoute><Layout><Vendas /></Layout></ProtectedRoute>} />
+          <Route path="/orcamentos" element={<ProtectedRoute><Layout><Orcamentos /></Layout></ProtectedRoute>} />
+          <Route path="/aluguel" element={<ProtectedRoute><Layout><Aluguel /></Layout></ProtectedRoute>} />
+          
+          {/* Sincronização: Estoque e Produtos */}
+          <Route path="/produtos" element={<ProtectedRoute><Layout><Estoque /></Layout></ProtectedRoute>} />
+          <Route path="/estoque" element={<ProtectedRoute><Layout><Estoque /></Layout></ProtectedRoute>} />
+          
+          <Route path="/fornecedores" element={<ProtectedRoute><Layout><Fornecedores /></Layout></ProtectedRoute>} />
+          <Route path="/financeiro" element={<ProtectedRoute><Layout><Financeiro /></Layout></ProtectedRoute>} />
+          <Route path="/relatorios" element={<ProtectedRoute><Layout><Relatorios /></Layout></ProtectedRoute>} />
+          <Route path="/configuracoes" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
+          
+          {/* Redirecionamentos e Erro */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

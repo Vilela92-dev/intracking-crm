@@ -14,21 +14,17 @@ import {
   Calendar,
   Layers,
   Calculator,
-  MessageSquare, // Ícone para a Miranda
-  Send,
-  Paperclip
+  Settings // Adicionado para a nova aba de configurações
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
+/**
+ * LAYOUT PRINCIPAL - ATELIÊ PRO
+ * Atualizado em: 2026-03-16
+ * Ajuste: Adição da rota de Configurações para Branding e WhatsApp.
+ */
 export function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [mirandaOpen, setMirandaOpen] = useState(false)
-  const [messages, setMessages] = useState([
-    { role: 'bot', content: 'Olá! Sou a Miranda, sua Arquiteta de QA. Como posso ajudar no refinamento do Ateliê PRO hoje?' }
-  ])
-  const [inputText, setInputText] = useState('')
-  const [loading, setLoading] = useState(false)
-  
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuth()
@@ -38,35 +34,7 @@ export function Layout({ children }) {
     navigate('/login')
   }
 
-  // --- LOGICA DA MIRANDA ---
-  const handleSendToMiranda = async () => {
-    if (!inputText.trim()) return;
-
-    setLoading(true);
-    const userMsg = { role: 'user', content: inputText };
-    setMessages(prev => [...prev, userMsg]);
-    setInputText('');
-
-    const formData = new FormData();
-    formData.append('chatInput', inputText);
-    // Aqui você pode adicionar o append de arquivos futuramente conforme sua necessidade
-
-    try {
-      // URL do seu n8n que configuramos anteriormente
-      const response = await fetch('https://intracking.app.n8n.cloud/webhook/a598084a-06c2-4af5-8f39-fd1de6d2c763/chatN', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await response.json();
-      
-      setMessages(prev => [...prev, { role: 'bot', content: data.output || 'Análise concluída com sucesso.' }]);
-    } catch (error) {
-      setMessages(prev => [...prev, { role: 'bot', content: 'Erro ao conectar com a Miranda. Verifique o Webhook.' }]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Lista de itens do menu - Adicionado 'Configurações' ao final
   const menuItems = [
     { path: '/dashboard', label: 'Dashboard', icon: Home },
     { path: '/crm', label: 'Noivas (Clientes)', icon: Users },
@@ -78,6 +46,7 @@ export function Layout({ children }) {
     { path: '/fornecedores', label: 'Fornecedores', icon: Truck },
     { path: '/financeiro', label: 'Fluxo de Caixa', icon: Landmark },
     { path: '/relatorios', label: 'Relatórios', icon: BarChart3 },
+    { path: '/configuracoes', label: 'Configurações', icon: Settings }, // Nova aba
   ]
 
   const isActive = (path) => location.pathname === path
@@ -91,11 +60,12 @@ export function Layout({ children }) {
         } bg-white border-r border-secondary-200 transition-all duration-300 flex flex-col shadow-sm z-20`}
       >
         <div className="p-4 border-b border-secondary-200 flex items-center gap-3 overflow-hidden bg-white">
+          {/* Logo Dinâmica (No futuro, o ícone 'I' virá das configurações) */}
           <div className="w-10 h-10 bg-primary-600 rounded-lg flex-shrink-0 flex items-center justify-center shadow-lg shadow-primary-200">
             <span className="text-white font-bold text-xl uppercase italic">I</span>
           </div>
           {sidebarOpen && (
-            <div className="flex flex-col">
+            <div className="flex flex-col animate-in fade-in slide-in-from-left-2 duration-300">
                 <span className="font-black text-lg text-secondary-900 leading-tight">Intracking</span>
                 <span className="text-[10px] text-primary-600 font-bold tracking-widest uppercase">Ateliê Pro</span>
             </div>
@@ -122,6 +92,7 @@ export function Layout({ children }) {
           ))}
         </nav>
 
+        {/* Rodapé da Sidebar */}
         <div className="p-4 border-t border-secondary-100">
           <button
             onClick={handleLogout}
@@ -170,74 +141,6 @@ export function Layout({ children }) {
             {children}
           </div>
         </main>
-
-        {/* --- BOTÃO FLUTUANTE MIRANDA --- */}
-        <button 
-          onClick={() => setMirandaOpen(!mirandaOpen)}
-          className={`fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 z-50 ${mirandaOpen ? 'bg-secondary-900 rotate-90' : 'bg-primary-600 hover:scale-110'}`}
-        >
-          {mirandaOpen ? <X className="text-white" /> : <MessageSquare className="text-white" />}
-        </button>
-
-        {/* --- SIDEBAR DA MIRANDA --- */}
-        <aside 
-          className={`fixed top-0 right-0 h-full w-[450px] bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.05)] z-40 transition-transform duration-500 ease-in-out border-l border-secondary-200 flex flex-col ${mirandaOpen ? 'translate-x-0' : 'translate-x-full'}`}
-        >
-          <div className="p-6 border-b border-secondary-100 bg-secondary-900 text-white">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-primary-500 rounded flex items-center justify-center font-black">M</div>
-              <div>
-                <h3 className="font-bold text-sm">Miranda AI</h3>
-                <p className="text-[10px] text-secondary-400 uppercase tracking-widest">Arquiteta de QA Sênior</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-secondary-50/30 custom-scrollbar">
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] p-4 rounded-2xl text-sm ${
-                  msg.role === 'user' 
-                    ? 'bg-primary-600 text-white shadow-md' 
-                    : 'bg-white border border-secondary-200 text-secondary-800 shadow-sm'
-                }`}>
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start italic text-xs text-secondary-400 animate-pulse">
-                Miranda está analisando o contexto...
-              </div>
-            )}
-          </div>
-
-          <div className="p-6 border-t border-secondary-100 bg-white">
-            <div className="relative">
-              <textarea 
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Descreva o comportamento ou cole um erro..."
-                className="w-full bg-secondary-50 border border-secondary-200 rounded-xl p-4 pr-12 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all resize-none h-24"
-              />
-              <div className="absolute bottom-3 right-3 flex gap-2">
-                <button className="p-2 text-secondary-400 hover:text-primary-600 transition-colors">
-                  <Paperclip size={18} />
-                </button>
-                <button 
-                  onClick={handleSendToMiranda}
-                  disabled={loading}
-                  className="p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-all disabled:opacity-50"
-                >
-                  <Send size={18} />
-                </button>
-              </div>
-            </div>
-            <p className="text-[10px] text-center text-secondary-400 mt-3 font-medium">
-              A Miranda analisa o código atual e o último commit automaticamente.
-            </p>
-          </div>
-        </aside>
       </div>
     </div>
   )

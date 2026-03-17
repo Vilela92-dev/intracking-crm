@@ -1,10 +1,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { 
-  Landmark, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Clock, Scale, Trash2, X
+  Landmark, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Clock, Scale, Trash2, X, DollarSign
 } from 'lucide-react'
 import api from '../services/api'
 
-// Utilitário para garantir comparação de datas sem erro de fuso horário
 const toDateString = (date) => {
   const d = new Date(date);
   return d.toISOString().split('T')[0];
@@ -18,6 +17,11 @@ export function Financeiro() {
   const [showModal, setShowModal] = useState(false)
   const [activeTab, setActiveTab] = useState('all')
   
+  // Estados para Liquidação
+  const [showPayModal, setShowPayModal] = useState(false)
+  const [selectedBill, setSelectedBill] = useState(null)
+  const [paymentData, setPaymentData] = useState({ paidValue: '', newDueDate: '' })
+
   const [formData, setFormData] = useState({
     description: '', value: '', type: 'despesa', category: 'FIXA', 
     dueDate: new Date().toISOString().split('T')[0], status: 'PENDENTE'
@@ -34,12 +38,32 @@ export function Financeiro() {
 
   useEffect(() => { fetchFinanceData() }, [fetchFinanceData])
 
-  const handlePay = async (id) => {
-    if (!window.confirm("Confirmar a liquidação deste valor?")) return;
+  // Abre o modal de pagamento com os dados da conta
+  const openPayModal = (bill) => {
+    setSelectedBill(bill)
+    setPaymentData({ 
+      paidValue: bill.value, 
+      newDueDate: bill.dueDate.split('T')[0] 
+    })
+    setShowPayModal(true)
+  }
+
+  const handleConfirmPayment = async () => {
     try {
-      await api.patch(`/finance/bills/${id}/pay`)
-      await fetchFinanceData()
-    } catch (err) { alert("Erro ao processar baixa") }
+      const paidValueNum = parseFloat(paymentData.paidValue);
+      const isPartial = paidValueNum < selectedBill.value;
+      
+      const payload = {
+        paidValue: paidValueNum,
+        newDueDate: isPartial ? paymentData.newDueDate : undefined 
+      };
+
+      await api.patch(`/finance/bills/${selectedBill.id}/pay`, payload)
+      setShowPayModal(false)
+      fetchFinanceData()
+    } catch (err) {
+      alert("Erro ao processar baixa: " + (err.response?.data?.message || "Verifique os valores"))
+    }
   }
 
   const handleDelete = async (id) => {
@@ -74,19 +98,16 @@ export function Financeiro() {
 
   const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
 
-  // --- LÓGICA DE PROJEÇÃO REVISADA (ESTRITAMENTE POR STRING DE DATA) ---
+  // Memoização do relatório para performance
   const report = useMemo(() => {
     const todayStr = toDateString(new Date());
     const refStr = toDateString(referenceDate);
 
-    // Definindo limites para Semana e Mês
     const startWeek = new Date(referenceDate);
     const day = startWeek.getDay();
     const diff = day === 0 ? 6 : day - 1;
     startWeek.setDate(startWeek.getDate() - diff);
-    const endWeek = new Date(startWeek);
-    endWeek.setDate(startWeek.getDate() + 6);
-
+    
     const startMonthStr = `${refStr.substring(0, 7)}-01`;
     const endMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
     const endMonthStr = toDateString(endMonth);
@@ -95,20 +116,21 @@ export function Financeiro() {
       const bDateStr = b.dueDate.split('T')[0];
       const val = parseFloat(b.value) || 0;
 
-      // 1. SALDO REAL (Tudo que já foi pago até agora)
       if (b.status === 'PAGO') {
         acc.saldoRealTotal += (b.type === 'receita' ? val : -val);
       }
 
-      // 2. PENDÊNCIAS ANTERIORES (Atrasados: data < hoje)
       if (b.status === 'PENDENTE' && bDateStr < todayStr) {
         acc.pendenciasAnteriores += val;
       }
 
-      // 3. LOGICA DO PERÍODO SELECIONADO (PARA O DASHBOARD)
       let isInPeriod = false;
       if (viewMode === 'day') isInPeriod = bDateStr === refStr;
-      else if (viewMode === 'week') isInPeriod = bDateStr >= toDateString(startWeek) && bDateStr <= toDateString(endWeek);
+      else if (viewMode === 'week') {
+        const endWeek = new Date(startWeek);
+        endWeek.setDate(startWeek.getDate() + 6);
+        isInPeriod = bDateStr >= toDateString(startWeek) && bDateStr <= toDateString(endWeek);
+      }
       else isInPeriod = bDateStr >= startMonthStr && bDateStr <= endMonthStr;
 
       if (isInPeriod) {
@@ -121,9 +143,7 @@ export function Financeiro() {
         }
       }
 
-      // 4. PROJEÇÃO FINAL
       acc.projeçãoFechamento = acc.saldoRealTotal + acc.pendenteNoPeriodo;
-
       return acc
     }, { 
       saldoRealTotal: 0, periodoEntrada: 0, periodoSaida: 0, 
@@ -131,17 +151,14 @@ export function Financeiro() {
     })
   }, [bills, referenceDate, viewMode])
 
-  // --- FILTRO DA TABELA ---
   const filteredBills = useMemo(() => {
     const refStr = toDateString(referenceDate);
-    
     return bills.filter(b => {
       const bDateStr = b.dueDate.split('T')[0];
       let isPeriod = false;
 
-      if (viewMode === 'day') {
-        isPeriod = bDateStr === refStr;
-      } else if (viewMode === 'week') {
+      if (viewMode === 'day') isPeriod = bDateStr === refStr;
+      else if (viewMode === 'week') {
         const startWeek = new Date(referenceDate);
         const day = startWeek.getDay();
         const diff = day === 0 ? 6 : day - 1;
@@ -195,7 +212,7 @@ export function Financeiro() {
         </button>
       </div>
 
-      {/* DASHBOARD */}
+      {/* DASHBOARD CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-secondary-900 p-6 rounded-[2.5rem] text-white shadow-2xl relative">
           <p className="text-[10px] font-bold uppercase opacity-60 tracking-widest">Saldo Real (Pago)</p>
@@ -207,11 +224,9 @@ export function Financeiro() {
 
         <div className="bg-indigo-600 p-6 rounded-[2.5rem] text-white shadow-2xl shadow-indigo-100 relative">
           <div className="absolute right-6 top-6 opacity-20"><Scale size={24}/></div>
-          <p className="text-[10px] font-bold uppercase opacity-80 tracking-widest text-indigo-100">
-            {viewMode === 'day' ? 'Projeção p/ Fim do Dia' : viewMode === 'week' ? 'Projeção p/ Fim da Semana' : 'Projeção p/ Fim do Mês'}
-          </p>
+          <p className="text-[10px] font-bold uppercase opacity-80 tracking-widest text-indigo-100">Projeção Fim do Período</p>
           <h2 className="text-3xl font-black mt-1">{formatCurrency(report.projeçãoFechamento)}</h2>
-          <p className="text-[10px] text-indigo-200 mt-4 font-bold italic underline decoration-indigo-400 underline-offset-4">Saldo Real + Pendentes</p>
+          <p className="text-[10px] text-indigo-200 mt-4 font-bold italic underline underline-offset-4 tracking-tight">Saldo Real + Pendentes</p>
         </div>
 
         <div className="bg-white p-6 rounded-[2.5rem] border-2 border-secondary-50 flex flex-col justify-between shadow-sm">
@@ -235,7 +250,7 @@ export function Financeiro() {
         </div>
       </div>
 
-      {/* TABELA */}
+      {/* TABLE */}
       <div className="bg-white border-2 border-secondary-50 rounded-[3rem] overflow-hidden shadow-xl">
         <div className="px-10 py-8 border-b border-secondary-100 flex justify-between items-center bg-secondary-50/30">
           <div className="flex gap-4">
@@ -273,7 +288,7 @@ export function Financeiro() {
                   <td className="px-10 py-6 text-center">
                     <div className="flex items-center justify-center gap-2">
                       {bill.status === 'PENDENTE' ? (
-                        <button onClick={() => handlePay(bill.id)} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-black transition-all">
+                        <button onClick={() => openPayModal(bill)} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-black transition-all">
                           Liquidar
                         </button>
                       ) : (
@@ -292,7 +307,63 @@ export function Financeiro() {
         </div>
       </div>
 
-      {/* MODAL */}
+      {/* MODAL DE LIQUIDAÇÃO */}
+      {showPayModal && selectedBill && (
+        <div className="fixed inset-0 bg-secondary-900/95 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[4rem] w-full max-w-lg shadow-2xl p-12 relative animate-in zoom-in-95 duration-200">
+            <button onClick={() => setShowPayModal(false)} className="absolute top-10 right-10 text-secondary-300 hover:text-black transition-colors"><X size={32}/></button>
+            
+            <div className="mb-10 text-center">
+              <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] mb-2 block">Confirmar Recebimento/Pagamento</span>
+              <h2 className="text-3xl font-black text-secondary-900 uppercase italic line-clamp-2">{selectedBill.description}</h2>
+              <div className="h-1 w-20 bg-indigo-600 mx-auto mt-4 rounded-full"></div>
+            </div>
+
+            <div className="space-y-8">
+              <div>
+                <label className="text-[11px] font-black uppercase text-secondary-400 mb-3 block text-center tracking-widest">Valor da Baixa</label>
+                <div className="relative group">
+                  <span className="absolute left-6 top-1/2 -translate-y-1/2 font-black text-secondary-300 text-xl group-focus-within:text-indigo-600 transition-colors">R$</span>
+                  <input 
+                    type="number" 
+                    className="w-full p-8 pl-16 bg-secondary-50 rounded-[2.5rem] border-2 border-transparent focus:border-indigo-600 outline-none font-black text-4xl text-secondary-900 transition-all text-center"
+                    value={paymentData.paidValue}
+                    onChange={(e) => setPaymentData({...paymentData, paidValue: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              {parseFloat(paymentData.paidValue) < selectedBill.value && (
+                <div className="p-6 bg-amber-50 border-2 border-amber-100 rounded-[2.5rem] space-y-4 animate-in fade-in slide-in-from-top-4">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-amber-600 mb-2 block flex items-center gap-2 justify-center">
+                      <Clock size={14}/> Reagendar saldo restante para:
+                    </label>
+                    <input 
+                      type="date" 
+                      className="w-full p-4 bg-white border-2 border-amber-200 rounded-2xl outline-none font-black text-secondary-800 text-center"
+                      value={paymentData.newDueDate}
+                      onChange={(e) => setPaymentData({...paymentData, newDueDate: e.target.value})}
+                    />
+                  </div>
+                  <p className="text-[10px] text-amber-700 text-center font-bold uppercase leading-relaxed opacity-70">
+                    O título atual será quitado parcialmente e uma nova pendência de {formatCurrency(selectedBill.value - paymentData.paidValue)} será gerada.
+                  </p>
+                </div>
+              )}
+
+              <button 
+                onClick={handleConfirmPayment}
+                className="w-full py-8 bg-secondary-900 text-white rounded-[2.5rem] font-black text-xs uppercase tracking-[0.3em] hover:bg-indigo-600 transition-all shadow-2xl flex items-center justify-center gap-3 active:scale-95"
+              >
+                {parseFloat(paymentData.paidValue) < selectedBill.value ? "Confirmar Baixa Parcial" : "Liquidar Totalmente"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE NOVO LANÇAMENTO (Mantido o original) */}
       {showModal && (
         <div className="fixed inset-0 bg-secondary-900/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[4rem] w-full max-w-lg shadow-2xl p-12 relative">
