@@ -10,7 +10,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+// Definimos a porta apenas uma vez para evitar erro de redeclaração
+const PORT: number = Number(process.env.PORT) || 3000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,7 +52,7 @@ const upload = multer({
 // ==========================================
 // BANCO DE DATA (ESTADO INICIAL)
 // ==========================================
-const db = {
+const db: any = {
   products: [],
   customers: [],
   suppliers: [],
@@ -76,8 +77,8 @@ const db = {
 // FUNÇÕES DE LOG E ESTOQUE (SEM SIMPLIFICAÇÃO)
 // ==========================================
 
-const logStockMovement = (productId, qty, type, destination, refId) => {
-  const product = db.products.find((p) => p.id === productId || p._id === productId);
+const logStockMovement = (productId: string, qty: number, type: string, destination: string, refId: string | number) => {
+  const product = db.products.find((p: any) => p.id === productId || p._id === productId);
   const entry = {
     id: uuidv4(),
     data: new Date(),
@@ -91,11 +92,11 @@ const logStockMovement = (productId, qty, type, destination, refId) => {
   db.stockMovements.push(entry);
 };
 
-const updateCustomerStatus = (customerId, newStatus) => {
+const updateCustomerStatus = (customerId: string, newStatus: string) => {
   if (!customerId) return;
-  const customer = db.customers.find((c) => c.id === customerId);
+  const customer = db.customers.find((c: any) => c.id === customerId);
   if (customer) {
-    const niveis = {
+    const niveis: any = {
       'PROSPECÇÃO': 1,
       'ORÇAMENTO': 2,
       'CONTRATO FECHADO': 3,
@@ -109,8 +110,8 @@ const updateCustomerStatus = (customerId, newStatus) => {
   }
 };
 
-const updateStock = (productId, qty, type) => {
-  const p = db.products.find((prod) => prod.id === productId || prod._id === productId);
+const updateStock = (productId: string, qty: number, type: string) => {
+  const p = db.products.find((prod: any) => prod.id === productId || prod._id === productId);
   if (!p) return;
   const amount = Number(qty);
   if (type === 'increase') {
@@ -128,8 +129,8 @@ const updateStock = (productId, qty, type) => {
   }
 };
 
-const updateOrAddProduct = (item) => {
-  let product = db.products.find((p) => 
+const updateOrAddProduct = (item: any) => {
+  let product = db.products.find((p: any) => 
     (item.id && p.id === item.id) || 
     (item.productId && p.id === item.productId) || 
     (p.name.toUpperCase() === item.name.toUpperCase() && p.category === item.category)
@@ -164,8 +165,8 @@ const updateOrAddProduct = (item) => {
   }
 };
 
-const processContractText = (template, data) => {
-  const map = {
+const processContractText = (template: string, data: any) => {
+  const map: any = {
     '{{atelierName}}': db.settings.atelierName,
     '{{cnpj_atelier}}': db.settings.cnpj,
     '{{endereco_atelier}}': db.settings.address,
@@ -175,7 +176,7 @@ const processContractText = (template, data) => {
     '{{endereco_cliente}}': data.customer?.address || '________________',
     '{{data_evento}}': data.customer?.eventDate ? new Date(data.customer.eventDate).toLocaleDateString('pt-BR') : '___/___/___',
     '{{total}}': new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(data.totalValue || 0),
-    '{{itens}}': data.customer?.projectDescription || data.projectDescription || data.items?.map(i => i.name).join(', ') || 'Peças sob medida'
+    '{{itens}}': data.customer?.projectDescription || data.projectDescription || data.items?.map((i: any) => i.name).join(', ') || 'Peças sob medida'
   };
 
   let processed = template;
@@ -206,7 +207,8 @@ router.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: 'Nenhum arquivo enviado.' });
   }
-  const fileUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+  // Usamos a variável PORT dinâmica para construir a URL
+  const fileUrl = `/uploads/${req.file.filename}`;
   res.status(201).json({ url: fileUrl, filename: req.file.filename });
 });
 
@@ -228,7 +230,7 @@ router.post('/crm/customers', (req, res) => {
 });
 
 router.put('/crm/customers/:id', (req, res) => {
-  const index = db.customers.findIndex((c) => c.id === req.params.id);
+  const index = db.customers.findIndex((c: any) => c.id === req.params.id);
   if (index === -1) return res.status(404).json({ message: "Não encontrado" });
   
   const current = db.customers[index];
@@ -251,7 +253,7 @@ router.put('/crm/customers/:id', (req, res) => {
 });
 
 router.delete('/crm/customers/:id', (req, res) => {
-  db.customers = db.customers.filter((c) => c.id !== req.params.id);
+  db.customers = db.customers.filter((c: any) => c.id !== req.params.id);
   res.status(204).send();
 });
 
@@ -271,7 +273,7 @@ router.post('/suppliers', (req, res) => {
 });
 
 router.delete('/suppliers/:id', (req, res) => {
-  db.suppliers = db.suppliers.filter(s => s.id !== req.params.id);
+  db.suppliers = db.suppliers.filter((s: any) => s.id !== req.params.id);
   res.status(204).send();
 });
 
@@ -282,7 +284,7 @@ router.get('/quotes', (req, res) => {
 
 router.post('/quotes', (req, res) => {
   const { customerId, items, laborCost, markup } = req.body;
-  const materialCost = (items || []).reduce((sum, i) => sum + (Number(i.price || 0) * Number(i.quantity || 0)), 0);
+  const materialCost = (items || []).reduce((sum: number, i: any) => sum + (Number(i.price || 0) * Number(i.quantity || 0)), 0);
   const total = (materialCost + Number(laborCost || 0)) * (1 + (Number(markup || 0) / 100));
 
   const q = { 
@@ -298,7 +300,7 @@ router.post('/quotes', (req, res) => {
 });
 
 router.put('/quotes/:id', (req, res) => {
-  const index = db.quotes.findIndex((q) => q.id === req.params.id);
+  const index = db.quotes.findIndex((q: any) => q.id === req.params.id);
   if (index === -1) return res.status(404).json({ message: "Não encontrado" });
   
   const quote = db.quotes[index];
@@ -306,14 +308,14 @@ router.put('/quotes/:id', (req, res) => {
 
   if (newStatus === 'APROVADO' && quote.status !== 'APROVADO') {
     if (quote.items) {
-      quote.items.forEach(i => updateStock(i.productId || i.id, i.quantity, 'reserve'));
+      quote.items.forEach((i: any) => updateStock(i.productId || i.id, i.quantity, 'reserve'));
     }
     updateCustomerStatus(quote.customerId, 'CONTRATO FECHADO');
   }
   
   if (newStatus === 'REPROVADO' && quote.status === 'APROVADO') {
     if (quote.items) {
-      quote.items.forEach(i => updateStock(i.productId || i.id, i.quantity, 'unreserve'));
+      quote.items.forEach((i: any) => updateStock(i.productId || i.id, i.quantity, 'unreserve'));
     }
   }
 
@@ -328,8 +330,8 @@ router.get('/sales', (req, res) => {
 
 router.post('/sales', (req, res) => {
   const { customerId, customerName, items, totalValue, valorEntrada, quoteId, parcelasAgendadas } = req.body;
-  const dbCustomer = db.customers.find(c => c.id === customerId);
-  const dbQuote = db.quotes.find(q => q.id === quoteId);
+  const dbCustomer = db.customers.find((c: any) => c.id === customerId);
+  const dbQuote = db.quotes.find((q: any) => q.id === quoteId);
   
   const saleId = uuidv4();
   const sale = { 
@@ -352,7 +354,7 @@ router.post('/sales', (req, res) => {
   updateCustomerStatus(customerId, 'CONTRATO FECHADO');
 
   if (sale.items) {
-    sale.items.forEach(i => {
+    sale.items.forEach((i: any) => {
       const pid = i.productId || i.id;
       if (quoteId) updateStock(pid, i.quantity, 'release');
       updateStock(pid, i.quantity, 'decrease');
@@ -375,7 +377,7 @@ router.post('/sales', (req, res) => {
   }
 
   if (parcelasAgendadas) {
-    parcelasAgendadas.forEach(p => {
+    parcelasAgendadas.forEach((p: any) => {
       db.finance.push({
         id: uuidv4(),
         type: 'receita',
@@ -399,7 +401,7 @@ router.get('/products', (req, res) => {
 });
 
 router.get('/products/rentables', (req, res) => {
-  const rentables = db.products.filter((p) => (p.can_rent || p.category === 'PEÇA_PRONTA') && p.stock > 0);
+  const rentables = db.products.filter((p: any) => (p.can_rent || p.category === 'PEÇA_PRONTA') && p.stock > 0);
   res.json({ data: rentables });
 });
 
@@ -411,7 +413,7 @@ router.post('/products', (req, res) => {
 router.post('/products/produce', (req, res) => {
   const { items, composition, bills, productName } = req.body;
   if (composition) {
-    composition.forEach(c => {
+    composition.forEach((c: any) => {
       const id = c.productId || c.id;
       if (id) {
         updateStock(id, c.quantityUsed, 'decrease');
@@ -420,10 +422,10 @@ router.post('/products/produce', (req, res) => {
     });
   }
   if (items) {
-    items.forEach(i => updateOrAddProduct(i));
+    items.forEach((i: any) => updateOrAddProduct(i));
   }
   if (bills) {
-    bills.forEach((bill, idx) => {
+    bills.forEach((bill: any, idx: number) => {
       db.finance.push({
         id: uuidv4(),
         type: 'despesa',
@@ -452,7 +454,7 @@ router.post('/rentals', (req, res) => {
   updateCustomerStatus(customerId, 'CONTRATO FECHADO');
 
   if (items) {
-    items.forEach(i => {
+    items.forEach((i: any) => {
       updateStock(i.productId, i.quantity, 'reserve');
       logStockMovement(i.productId, i.quantity, 'saida', `ALUGUEL: ${customerName}`, rentalId);
     });
@@ -474,7 +476,7 @@ router.post('/rentals', (req, res) => {
   }
 
   if (parcelasAgendadas) {
-    parcelasAgendadas.forEach(p => {
+    parcelasAgendadas.forEach((p: any) => {
       db.finance.push({
         id: uuidv4(),
         rentalId: rentalId,
@@ -508,14 +510,14 @@ router.post('/rentals', (req, res) => {
 router.patch('/rentals/:id/return', (req, res) => {
   const { id } = req.params;
   const { statusEstoque } = req.body;
-  const rental = db.rentals.find(r => r.id === id);
+  const rental = db.rentals.find((r: any) => r.id === id);
   
   if (!rental) return res.status(404).json({ message: "Aluguel não encontrado" });
   
   rental.status = 'RETURNED';
   if (rental.items) {
-    rental.items.forEach(item => {
-      const product = db.products.find(p => p.id === item.productId);
+    rental.items.forEach((item: any) => {
+      const product = db.products.find((p: any) => p.id === item.productId);
       if (product) {
         product.reserved = Math.max(0, (product.reserved || 0) - item.quantity);
         product.stock += item.quantity;
@@ -544,7 +546,7 @@ router.post('/finance/bills', (req, res) => {
 });
 
 router.patch('/finance/bills/:id/pay', (req, res) => {
-  const index = db.finance.findIndex(b => b.id === req.params.id);
+  const index = db.finance.findIndex((b: any) => b.id === req.params.id);
   if (index === -1) return res.status(404).send("Conta não encontrada");
   
   const bill = db.finance[index];
@@ -575,7 +577,7 @@ router.patch('/finance/bills/:id/pay', (req, res) => {
 });
 
 router.delete('/finance/bills/:id', (req, res) => {
-  db.finance = db.finance.filter(b => b.id !== req.params.id);
+  db.finance = db.finance.filter((b: any) => b.id !== req.params.id);
   res.status(204).send();
 });
 
@@ -598,10 +600,10 @@ router.get('/reports/stock-movements', (req, res) => {
 router.get('/contracts/:type/:id/print', (req, res) => {
   const { type, id } = req.params;
   const collection = db[type];
-  const document = collection?.find(d => d.id === id);
+  const document = collection?.find((d: any) => d.id === id);
   if (!document) return res.status(404).send("<h1>Documento não encontrado.</h1>");
   
-  const customer = db.customers.find(c => c.id === document.customerId);
+  const customer = db.customers.find((c: any) => c.id === document.customerId);
   const template = type === 'sales' ? db.settings.contractSale : db.settings.contractRental;
   const content = processContractText(template, { ...document, customer });
 
@@ -636,10 +638,10 @@ router.get('/contracts/:type/:id/print', (req, res) => {
   `);
 });
 
+// VINCULA O ROUTER AO APP
+app.use('/api/v1', router);
 
-// Forçamos a conversão para número para o TS não reclamar
-const PORT: number = Number(process.env.PORT) || 3000;
-
+// ESCUTA O SERVIDOR
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 SERVIDOR RODANDO NA PORTA: ${PORT}`);
+  console.log(`🚀 SERVIDOR COMPLETO RODANDO NA PORTA: ${PORT}`);
 });
