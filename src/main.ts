@@ -636,9 +636,10 @@ router.get('/contracts/:type/:id/print', (req, res) => {
   `);
 });
 
-// VINCULA O ROUTER AO APP
-app.use('/api/v1', router);
+
+// Forçamos a conversão para número para o TS não reclamar
+const PORT: number = Number(process.env.PORT) || 3000;
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 SERVIDOR COMPLETO RODANDO EM http://localhost:${PORT}`);
+  console.log(`🚀 SERVIDOR RODANDO NA PORTA: ${PORT}`);
 });
