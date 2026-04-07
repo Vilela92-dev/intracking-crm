@@ -1,5 +1,5 @@
-import pkg from '@prisma/client';
-const { PrismaClient } = pkg;
+// @ts-nocheck
+import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
