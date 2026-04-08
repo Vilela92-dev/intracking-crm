@@ -1,15 +1,19 @@
 import axios from 'axios'
 
 const api = axios.create({
-  // Use 'localhost' em vez de 127.0.0.1 para testar
-  baseURL: 'http://localhost:3000/api/v1', 
+  // URL do Heroku (Produção)
+  baseURL: 'https://intracking-crm-atelierpro-95c386fda1d5.herokuapp.com/api/v1',
+  
+  // Se precisar voltar para o teste local, basta comentar a linha de cima e descomentar a de baixo:
+  // baseURL: 'http://localhost:3000/api/v1', 
+  
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
-// Adicione este log para vermos no console do navegador para onde o app está olhando
-console.log("API Base URL:", api.defaults.baseURL);
+// Log para conferirmos no console do navegador se a URL mudou mesmo
+console.log("API Base URL conectada:", api.defaults.baseURL);
 
 api.interceptors.request.use(
   (config) => {

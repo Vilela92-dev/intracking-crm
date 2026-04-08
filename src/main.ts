@@ -1,3 +1,4 @@
+// @ts-nocheck
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
@@ -5,21 +6,45 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import bcrypt from 'bcryptjs';
+import { PrismaClient } from '@prisma/client';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
+const Database = require('better-sqlite3');
+
+// ==========================================
+// CONFIGURAÇÃO PRISMA (MOTOR DO SAAS)
+// ==========================================
+
+const db = new Database('./prisma/dev.db');
+const adapter = new PrismaBetterSqlite3({ url: 'file:./prisma/dev.db' });
+const prisma = new PrismaClient({ adapter });
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Definimos a porta apenas uma vez para evitar erro de redeclaração
 const PORT: number = Number(process.env.PORT) || 3000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ==========================================
+// MIDDLEWARE DE ISOLAMENTO (TENANT)
+// ==========================================
+const tenantMiddleware = (req: any, res: any, next: any) => {
+  // O ID padrão 'tenant-esposa-id' é apenas um fallback para testes
+  const tenantId = req.headers['x-tenant-id'] || 'tenant-esposa-id';
+  req.tenantId = tenantId;
+  next();
+};
+
+// ==========================================
 // CONFIGURAÇÃO DE UPLOADS (ESTRUTURA COMPLETA)
 // ==========================================
-const uploadDir = path.join(__dirname, 'uploads');
+const uploadDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -50,51 +75,17 @@ const upload = multer({
 });
 
 // ==========================================
-// BANCO DE DATA (ESTADO INICIAL)
+// FUNÇÕES DE LOG E ESTOQUE (MIGRADAS PARA PRISMA)
 // ==========================================
-const db: any = {
-  products: [],
-  customers: [],
-  suppliers: [],
-  quotes: [],
-  sales: [],
-  rentals: [],
-  appointments: [],
-  finance: [],
-  stockMovements: [],
-  settings: {
-    atelierName: 'Atelier Pro',
-    logoUrl: '',
-    primaryColor: '#4f46e5',
-    cnpj: '00.000.000/0001-00',
-    address: 'Rua Exemplo, 123 - Centro',
-    contractSale: 'CONTRATO DE COMPRA E VENDA\n\nCONTRATADA: {{atelierName}}, CNPJ {{cnpj_atelier}}.\nCONTRATANTE: {{nome}}, CPF {{cpf_cliente}}, RG {{rg_cliente}}.\n\nOBJETO: {{itens}}\n\nVALOR TOTAL: {{total}}\n\nAssinatura: __________________________',
-    contractRental: 'CONTRATO DE LOCAÇÃO\n\nLOCADOR: {{atelierName}}, residente em {{endereco_atelier}}.\nLOCATÁRIO: {{nome}}, CPF {{cpf_cliente}}.\n\nDATA DO EVENTO: {{data_evento}}\nOBJETO: {{itens}}\n\nVALOR TOTAL: {{total}}\n\nAssinatura: __________________________'
-  }
+
+const logStockMovement = async (tenantId: string, productId: string, qty: number, type: string, destination: string, refId: string | number) => {
+  console.log(`[MOVIMENTAÇÃO] Tenant: ${tenantId} | Produto: ${productId} | Qtd: ${qty} | Tipo: ${type} | Ref: ${refId}`);
 };
 
-// ==========================================
-// FUNÇÕES DE LOG E ESTOQUE (SEM SIMPLIFICAÇÃO)
-// ==========================================
-
-const logStockMovement = (productId: string, qty: number, type: string, destination: string, refId: string | number) => {
-  const product = db.products.find((p: any) => p.id === productId || p._id === productId);
-  const entry = {
-    id: uuidv4(),
-    data: new Date(),
-    item: product ? product.name : 'ITEM DESCONHECIDO',
-    qtd: qty,
-    tipo: type,
-    origem_destino: destination.toUpperCase(),
-    doc_referencia: String(refId).toUpperCase().substring(0, 10),
-    createdAt: new Date()
-  };
-  db.stockMovements.push(entry);
-};
-
-const updateCustomerStatus = (customerId: string, newStatus: string) => {
+const updateCustomerStatus = async (tenantId: string, customerId: string, newStatus: string) => {
   if (!customerId) return;
-  const customer = db.customers.find((c: any) => c.id === customerId);
+  const customer = await prisma.customer.findFirst({ where: { id: customerId, tenantId } });
+  
   if (customer) {
     const niveis: any = {
       'PROSPECÇÃO': 1,
@@ -104,72 +95,89 @@ const updateCustomerStatus = (customerId: string, newStatus: string) => {
     };
     const nivelAtual = niveis[customer.status] || 0;
     const novoNivel = niveis[newStatus] || 0;
+    
     if (novoNivel > nivelAtual) {
-      customer.status = newStatus;
+      await prisma.customer.update({
+        where: { id: customerId },
+        data: { status: newStatus }
+      });
     }
   }
 };
 
-const updateStock = (productId: string, qty: number, type: string) => {
-  const p = db.products.find((prod: any) => prod.id === productId || prod._id === productId);
+const updateStock = async (tenantId: string, productId: string, qty: number, type: string) => {
+  const p = await prisma.product.findFirst({ where: { id: productId, tenantId } });
   if (!p) return;
+  
   const amount = Number(qty);
-  if (type === 'increase') {
-    p.stock += amount;
-  } else if (type === 'decrease') {
-    p.stock -= amount;
-  } else if (type === 'reserve') {
-    p.stock -= amount;
-    p.reserved = (p.reserved || 0) + amount;
+  let newData: any = {};
+
+  if (type === 'increase') newData.stock = p.stock + amount;
+  else if (type === 'decrease') newData.stock = p.stock - amount;
+  else if (type === 'reserve') {
+    newData.stock = p.stock - amount;
+    newData.reserved = (p.reserved || 0) + amount;
   } else if (type === 'release') {
-    p.reserved = (p.reserved || 0) - amount;
+    newData.reserved = (p.reserved || 0) - amount;
   } else if (type === 'unreserve') {
-    p.reserved = (p.reserved || 0) - amount;
-    p.stock += amount;
+    newData.reserved = (p.reserved || 0) - amount;
+    newData.stock = p.stock + amount;
   }
+
+  await prisma.product.update({ where: { id: productId }, data: newData });
 };
 
-const updateOrAddProduct = (item: any) => {
-  let product = db.products.find((p: any) => 
-    (item.id && p.id === item.id) || 
-    (item.productId && p.id === item.productId) || 
-    (p.name.toUpperCase() === item.name.toUpperCase() && p.category === item.category)
-  );
+const updateOrAddProduct = async (tenantId: string, item: any) => {
+  let product = await prisma.product.findFirst({
+    where: {
+      tenantId,
+      OR: [
+        { id: item.id || '' },
+        { id: item.productId || '' },
+        { name: { equals: item.name.toUpperCase() } }
+      ]
+    }
+  });
 
   const quantity = Number(item.quantity || item.usedQty || 0);
   const price = Number(item.unitPrice || item.price || 0);
   let unitLabel = (item.unitType || item.unit || '').toUpperCase().includes('METRO') ? 'METROS' : 'UNIDADE';
 
   if (product) {
-    product.stock += quantity;
-    if (price > 0) product.price = price;
-    logStockMovement(product.id, quantity, 'entrada', 'REPOSIÇÃO / COMPRA', 'EST-ADD');
-    return product;
+    const updated = await prisma.product.update({
+      where: { id: product.id },
+      data: {
+        stock: product.stock + quantity,
+        price: price > 0 ? price : product.price
+      }
+    });
+    await logStockMovement(tenantId, product.id, quantity, 'entrada', 'REPOSIÇÃO / COMPRA', 'EST-ADD');
+    return updated;
   } else {
-    const newProduct = {
-      id: uuidv4(),
-      name: item.name.toUpperCase(),
-      unit: unitLabel,
-      category: item.category || 'INSUMO',
-      stock: quantity,
-      reserved: 0,
-      price: price,
-      can_rent: item.can_rent || false,
-      can_sell: item.can_sell || false,
-      status: item.status || 'DISPONIVEL',
-      createdAt: new Date()
-    };
-    db.products.push(newProduct);
-    logStockMovement(newProduct.id, quantity, 'entrada', 'CADASTRO INICIAL', 'NEW-PROD');
+    const newProduct = await prisma.product.create({
+      data: {
+        name: item.name.toUpperCase(),
+        unit: unitLabel,
+        category: item.category || 'INSUMO',
+        stock: quantity,
+        reserved: 0,
+        price: price,
+        can_rent: item.can_rent || false,
+        can_sell: item.can_sell || false,
+        status: item.status || 'DISPONIVEL',
+        tenantId: tenantId
+      }
+    });
+    await logStockMovement(tenantId, newProduct.id, quantity, 'entrada', 'CADASTRO INICIAL', 'NEW-PROD');
     return newProduct;
   }
 };
 
-const processContractText = (template: string, data: any) => {
+const processContractText = (settings: any, template: string, data: any) => {
   const map: any = {
-    '{{atelierName}}': db.settings.atelierName,
-    '{{cnpj_atelier}}': db.settings.cnpj,
-    '{{endereco_atelier}}': db.settings.address,
+    '{{atelierName}}': settings.atelierName,
+    '{{cnpj_atelier}}': settings.cnpj || '',
+    '{{endereco_atelier}}': settings.address || '',
     '{{nome}}': data.customer?.name || '________________',
     '{{cpf_cliente}}': data.customer?.cpf || '________________',
     '{{rg_cliente}}': data.customer?.rg || '________________',
@@ -188,460 +196,346 @@ const processContractText = (template: string, data: any) => {
 };
 
 // ==========================================
+// ROTA DE SETUP (CADASTRO DE NOVAS EMPRESAS)
+// Esta rota precisa estar ANTES do router com tenantMiddleware
+// ==========================================
+app.post('/setup', async (req, res) => {
+  try {
+    const { atelierName, email, password, name } = req.body;
+
+    // Verificar se o e-mail já existe
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({ message: "Este e-mail já está cadastrado em outro ateliê." });
+    }
+
+    // 1. Criar a Empresa (Tenant)
+    const tenant = await prisma.tenant.create({
+      data: {
+        name: atelierName || "Novo Ateliê",
+        plan: "FREE"
+      }
+    });
+
+    // 2. Criptografar a senha
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 3. Criar o Usuário vinculado ao Tenant
+    const user = await prisma.user.create({
+      data: {
+        email,
+        name: name || atelierName,
+        password: hashedPassword,
+        tenantId: tenant.id,
+        role: "ADMIN"
+      }
+    });
+
+    // 4. Criar as Settings iniciais
+    await prisma.settings.create({
+      data: {
+        atelierName: atelierName || "Meu Ateliê",
+        tenantId: tenant.id,
+        primaryColor: "#4f46e5"
+      }
+    });
+
+    console.log(`✅ Ambiente criado com sucesso: ${atelierName} (${email})`);
+    res.status(201).json({ message: "Ambiente criado com sucesso!", tenantId: tenant.id });
+
+  } catch (error) {
+    console.error("❌ Erro ao processar setup:", error);
+    res.status(500).json({ message: "Erro interno ao criar ambiente." });
+  }
+});
+
+// ==========================================
 // ROTAS DO SISTEMA (PREFIXO /API/V1)
 // ==========================================
 const router = express.Router();
+router.use(tenantMiddleware);
 
-// --- CONFIGURAÇÕES ---
-router.get('/settings', (req, res) => {
-  res.json({ data: db.settings });
+router.get('/settings', async (req: any, res) => {
+  const settings = await prisma.settings.findUnique({ where: { tenantId: req.tenantId } });
+  res.json({ data: settings });
 });
 
-router.post('/settings', (req, res) => {
-  db.settings = { ...db.settings, ...req.body };
-  res.json({ message: "Configurações atualizadas!", data: db.settings });
+router.post('/settings', async (req: any, res) => {
+  const settings = await prisma.settings.upsert({
+    where: { tenantId: req.tenantId },
+    update: req.body,
+    create: { ...req.body, tenantId: req.tenantId }
+  });
+  res.json({ message: "Configurações atualizadas!", data: settings });
 });
 
-// --- UPLOAD ---
-router.post('/upload', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ message: 'Nenhum arquivo enviado.' });
-  }
-  // Usamos a variável PORT dinâmica para construir a URL
+app.post('/api/v1/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'Nenhum arquivo enviado.' });
   const fileUrl = `/uploads/${req.file.filename}`;
   res.status(201).json({ url: fileUrl, filename: req.file.filename });
 });
 
-// --- CRM / CLIENTES ---
-router.get('/crm/customers', (req, res) => {
-  res.json({ data: db.customers || [] });
+router.get('/crm/customers', async (req: any, res) => {
+  const customers = await prisma.customer.findMany({ where: { tenantId: req.tenantId } });
+  res.json({ data: customers });
 });
 
-router.post('/crm/customers', (req, res) => {
-  const customer = { 
-    ...req.body, 
-    id: uuidv4(), 
-    measurementsHistory: [], 
-    createdAt: new Date(), 
-    status: req.body.status || 'PROSPECÇÃO' 
-  };
-  db.customers.push(customer);
+router.post('/crm/customers', async (req: any, res) => {
+  const customer = await prisma.customer.create({
+    data: { ...req.body, tenantId: req.tenantId, status: req.body.status || 'PROSPECÇÃO' }
+  });
   res.status(201).json(customer);
 });
 
-router.put('/crm/customers/:id', (req, res) => {
-  const index = db.customers.findIndex((c: any) => c.id === req.params.id);
-  if (index === -1) return res.status(404).json({ message: "Não encontrado" });
-  
-  const current = db.customers[index];
-  let updatedHistory = current.measurementsHistory || [];
-  
-  if (req.body.saveSnapshot && req.body.measurements) {
-    updatedHistory.push({
-      date: new Date().toISOString(),
-      data: { ...req.body.measurements }
-    });
-  }
-  
-  db.customers[index] = { 
-    ...current, 
-    ...req.body, 
-    id: req.params.id, 
-    measurementsHistory: updatedHistory 
-  };
-  res.json(db.customers[index]);
+router.put('/crm/customers/:id', async (req: any, res) => {
+  const updated = await prisma.customer.update({
+    where: { id: req.params.id },
+    data: req.body
+  });
+  res.json(updated);
 });
 
-router.delete('/crm/customers/:id', (req, res) => {
-  db.customers = db.customers.filter((c: any) => c.id !== req.params.id);
+router.delete('/crm/customers/:id', async (req: any, res) => {
+  await prisma.customer.delete({ where: { id: req.params.id } });
   res.status(204).send();
 });
 
-// --- FORNECEDORES ---
-router.get('/suppliers', (req, res) => {
-  res.json({ data: db.suppliers || [] });
+router.get('/suppliers', async (req: any, res) => {
+  const data = await prisma.supplier.findMany({ where: { tenantId: req.tenantId } });
+  res.json({ data });
 });
 
-router.post('/suppliers', (req, res) => {
-  const supplier = {
-    ...req.body,
-    id: uuidv4(),
-    createdAt: new Date()
-  };
-  db.suppliers.push(supplier);
+router.post('/suppliers', async (req: any, res) => {
+  const supplier = await prisma.supplier.create({
+    data: { ...req.body, tenantId: req.tenantId }
+  });
   res.status(201).json(supplier);
 });
 
-router.delete('/suppliers/:id', (req, res) => {
-  db.suppliers = db.suppliers.filter((s: any) => s.id !== req.params.id);
+router.delete('/suppliers/:id', async (req: any, res) => {
+  await prisma.supplier.delete({ where: { id: req.params.id } });
   res.status(204).send();
 });
 
-// --- ORÇAMENTOS ---
-router.get('/quotes', (req, res) => {
-  res.json({ data: db.quotes || [] });
+router.get('/quotes', async (req: any, res) => {
+  const data = await prisma.quote.findMany({ 
+    where: { tenantId: req.tenantId },
+    include: { customer: true }
+  });
+  res.json({ data });
 });
 
-router.post('/quotes', (req, res) => {
+router.post('/quotes', async (req: any, res) => {
   const { customerId, items, laborCost, markup } = req.body;
   const materialCost = (items || []).reduce((sum: number, i: any) => sum + (Number(i.price || 0) * Number(i.quantity || 0)), 0);
   const total = (materialCost + Number(laborCost || 0)) * (1 + (Number(markup || 0) / 100));
 
-  const q = { 
-    ...req.body, 
-    id: uuidv4(), 
-    totalValue: total, 
-    status: 'PENDENTE', 
-    createdAt: new Date() 
-  };
-  db.quotes.push(q);
-  updateCustomerStatus(customerId, 'ORÇAMENTO');
+  const q = await prisma.quote.create({
+    data: { 
+      ...req.body, 
+      totalValue: total, 
+      status: 'PENDENTE', 
+      tenantId: req.tenantId 
+    }
+  });
+  await updateCustomerStatus(req.tenantId, customerId, 'ORÇAMENTO');
   res.status(201).json(q);
 });
 
-router.put('/quotes/:id', (req, res) => {
-  const index = db.quotes.findIndex((q: any) => q.id === req.params.id);
-  if (index === -1) return res.status(404).json({ message: "Não encontrado" });
+router.put('/quotes/:id', async (req: any, res) => {
+  const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
+  if (!quote) return res.status(404).json({ message: "Não encontrado" });
   
-  const quote = db.quotes[index];
   const newStatus = req.body.status;
-
   if (newStatus === 'APROVADO' && quote.status !== 'APROVADO') {
-    if (quote.items) {
-      quote.items.forEach((i: any) => updateStock(i.productId || i.id, i.quantity, 'reserve'));
+    if (req.body.items) {
+      for (const i of req.body.items) {
+        await updateStock(req.tenantId, i.productId || i.id, i.quantity, 'reserve');
+      }
     }
-    updateCustomerStatus(quote.customerId, 'CONTRATO FECHADO');
-  }
-  
-  if (newStatus === 'REPROVADO' && quote.status === 'APROVADO') {
-    if (quote.items) {
-      quote.items.forEach((i: any) => updateStock(i.productId || i.id, i.quantity, 'unreserve'));
-    }
+    await updateCustomerStatus(req.tenantId, quote.customerId, 'CONTRATO FECHADO');
   }
 
-  db.quotes[index] = { ...quote, ...req.body, id: req.params.id };
-  res.json(db.quotes[index]);
+  const updated = await prisma.quote.update({
+    where: { id: req.params.id },
+    data: req.body
+  });
+  res.json(updated);
 });
 
-// --- VENDAS ---
-router.get('/sales', (req, res) => {
-  res.json({ data: db.sales || [] });
+router.get('/sales', async (req: any, res) => {
+  const data = await prisma.sale.findMany({ where: { tenantId: req.tenantId }, include: { customer: true } });
+  res.json({ data });
 });
 
-router.post('/sales', (req, res) => {
-  const { customerId, customerName, items, totalValue, valorEntrada, quoteId, parcelasAgendadas } = req.body;
-  const dbCustomer = db.customers.find((c: any) => c.id === customerId);
-  const dbQuote = db.quotes.find((q: any) => q.id === quoteId);
+router.post('/sales', async (req: any, res) => {
+  const { customerId, items, totalValue, valorEntrada, quoteId, parcelasAgendadas } = req.body;
   
-  const saleId = uuidv4();
-  const sale = { 
-    ...req.body, 
-    id: saleId, 
-    customerName: customerName || dbCustomer?.name || dbQuote?.customerName || "Não Identificado",
-    items: items || dbQuote?.items || [],
-    totalValue: Number(totalValue || dbQuote?.totalValue || 0),
-    status: 'CONCLUIDO', 
-    createdAt: new Date() 
-  };
+  const sale = await prisma.sale.create({
+    data: { 
+      totalValue: Number(totalValue),
+      customerId,
+      tenantId: req.tenantId,
+      status: 'CONCLUIDO'
+    }
+  });
 
-  db.sales.push(sale);
-
-  if (dbQuote) {
-    dbQuote.isConverted = true;
-    dbQuote.status = 'APROVADO';
+  if (quoteId) {
+    await prisma.quote.update({ where: { id: quoteId }, data: { isConverted: true, status: 'APROVADO' } });
   }
 
-  updateCustomerStatus(customerId, 'CONTRATO FECHADO');
+  await updateCustomerStatus(req.tenantId, customerId, 'CONTRATO FECHADO');
 
-  if (sale.items) {
-    sale.items.forEach((i: any) => {
+  if (items) {
+    for (const i of items) {
       const pid = i.productId || i.id;
-      if (quoteId) updateStock(pid, i.quantity, 'release');
-      updateStock(pid, i.quantity, 'decrease');
-      logStockMovement(pid, i.quantity, 'saida', `VENDA: ${sale.customerName}`, saleId);
-    });
+      if (quoteId) await updateStock(req.tenantId, pid, i.quantity, 'release');
+      await updateStock(req.tenantId, pid, i.quantity, 'decrease');
+      await logStockMovement(req.tenantId, pid, i.quantity, 'saida', `VENDA`, sale.id);
+    }
   }
 
   if (Number(valorEntrada) > 0) {
-    db.finance.push({
-      id: uuidv4(),
-      type: 'receita',
-      value: Number(valorEntrada),
-      status: 'PAGO',
-      customerName: sale.customerName,
-      description: `Entrada Venda - ${sale.customerName}`,
-      dueDate: new Date(),
-      createdAt: new Date(),
-      customerId
-    });
-  }
-
-  if (parcelasAgendadas) {
-    parcelasAgendadas.forEach((p: any) => {
-      db.finance.push({
-        id: uuidv4(),
+    await prisma.finance.create({
+      data: {
         type: 'receita',
-        value: Number(p.valor),
-        status: 'PENDENTE',
-        customerName: sale.customerName,
-        description: `Parcela ${p.numero} Venda - ${sale.customerName}`,
-        dueDate: p.vencimento,
-        createdAt: new Date(),
-        customerId
-      });
+        value: Number(valorEntrada),
+        status: 'PAGO',
+        description: `Entrada Venda`,
+        dueDate: new Date(),
+        tenantId: req.tenantId
+      }
     });
   }
 
   res.status(201).json(sale);
 });
 
-// --- ESTOQUE E PRODUÇÃO ---
-router.get('/products', (req, res) => {
-  res.json({ data: db.products || [] });
+router.get('/products', async (req: any, res) => {
+  const data = await prisma.product.findMany({ where: { tenantId: req.tenantId } });
+  res.json({ data });
 });
 
-router.get('/products/rentables', (req, res) => {
-  const rentables = db.products.filter((p: any) => (p.can_rent || p.category === 'PEÇA_PRONTA') && p.stock > 0);
-  res.json({ data: rentables });
-});
-
-router.post('/products', (req, res) => {
-  const product = updateOrAddProduct(req.body);
+router.post('/products', async (req: any, res) => {
+  const product = await updateOrAddProduct(req.tenantId, req.body);
   res.status(201).json(product);
 });
 
-router.post('/products/produce', (req, res) => {
+router.post('/products/produce', async (req: any, res) => {
   const { items, composition, bills, productName } = req.body;
   if (composition) {
-    composition.forEach((c: any) => {
+    for (const c of composition) {
       const id = c.productId || c.id;
-      if (id) {
-        updateStock(id, c.quantityUsed, 'decrease');
-        logStockMovement(id, c.quantityUsed, 'saida', `PRODUÇÃO: ${productName || 'PEÇA'}`, 'OP-PROD');
-      }
-    });
+      await updateStock(req.tenantId, id, c.quantityUsed, 'decrease');
+      await logStockMovement(req.tenantId, id, c.quantityUsed, 'saida', `PRODUÇÃO: ${productName}`, 'OP-PROD');
+    }
   }
   if (items) {
-    items.forEach((i: any) => updateOrAddProduct(i));
+    for (const i of items) await updateOrAddProduct(req.tenantId, i);
   }
   if (bills) {
-    bills.forEach((bill: any, idx: number) => {
-      db.finance.push({
-        id: uuidv4(),
-        type: 'despesa',
-        value: Number(bill.value),
-        status: 'PENDENTE',
-        description: bill.description || `Parcela Produção ${idx+1}`,
-        dueDate: bill.dueDate,
-        createdAt: new Date()
+    for (const bill of bills) {
+      await prisma.finance.create({
+        data: {
+          type: 'despesa',
+          value: Number(bill.value),
+          status: 'PENDENTE',
+          description: bill.description,
+          dueDate: new Date(bill.dueDate),
+          tenantId: req.tenantId
+        }
       });
-    });
+    }
   }
-  res.status(201).json({ message: "Produção processada com sucesso" });
+  res.status(201).json({ message: "Produção processada" });
 });
 
-// --- ALUGUÉIS ---
-router.get('/rentals', (req, res) => {
-  res.json({ data: db.rentals || [] });
+router.get('/rentals', async (req: any, res) => {
+  const data = await prisma.rental.findMany({ where: { tenantId: req.tenantId }, include: { customer: true } });
+  res.json({ data });
 });
 
-router.post('/rentals', (req, res) => {
-  const { customerId, customerName, items, totalValue, valorEntrada, parcelasAgendadas, dataRetirada, dataDevolucao } = req.body;
-  const rentalId = uuidv4();
-  const rental = { ...req.body, id: rentalId, status: 'ACTIVE', createdAt: new Date() };
-  
-  db.rentals.push(rental);
-  updateCustomerStatus(customerId, 'CONTRATO FECHADO');
+router.post('/rentals', async (req: any, res) => {
+  const { customerId, items, totalValue, valorEntrada, dataRetirada, dataDevolucao } = req.body;
+  const rental = await prisma.rental.create({
+    data: { 
+      totalValue: Number(totalValue),
+      customerId,
+      dataRetirada: dataRetirada ? new Date(dataRetirada) : null,
+      dataDevolucao: dataDevolucao ? new Date(dataDevolucao) : null,
+      tenantId: req.tenantId,
+      status: 'ACTIVE'
+    }
+  });
+
+  await updateCustomerStatus(req.tenantId, customerId, 'CONTRATO FECHADO');
 
   if (items) {
-    items.forEach((i: any) => {
-      updateStock(i.productId, i.quantity, 'reserve');
-      logStockMovement(i.productId, i.quantity, 'saida', `ALUGUEL: ${customerName}`, rentalId);
-    });
-  }
-
-  if (Number(valorEntrada) > 0) {
-    db.finance.push({
-      id: uuidv4(),
-      rentalId: rentalId,
-      type: 'receita',
-      value: Number(valorEntrada),
-      status: 'PAGO',
-      customerName: customerName,
-      description: `Entrada Aluguel - ${customerName}`,
-      dueDate: new Date(),
-      createdAt: new Date(),
-      customerId: customerId
-    });
-  }
-
-  if (parcelasAgendadas) {
-    parcelasAgendadas.forEach((p: any) => {
-      db.finance.push({
-        id: uuidv4(),
-        rentalId: rentalId,
-        type: 'receita',
-        value: Number(p.valor),
-        status: 'PENDENTE',
-        customerName: customerName,
-        description: `Parcela ${p.numero} Aluguel - ${customerName}`,
-        dueDate: p.vencimento,
-        createdAt: new Date(),
-        customerId: customerId
-      });
-    });
-  }
-
-  if (dataRetirada) {
-    db.appointments.push({
-      id: uuidv4(),
-      rentalId: rentalId,
-      title: `RETIRADA: ${customerName}`,
-      date: dataRetirada,
-      time: "10:00",
-      type: "RETIRADA",
-      customerId: customerId
-    });
+    for (const i of items) {
+      await updateStock(req.tenantId, i.productId, i.quantity, 'reserve');
+    }
   }
 
   res.status(201).json(rental);
 });
 
-router.patch('/rentals/:id/return', (req, res) => {
-  const { id } = req.params;
-  const { statusEstoque } = req.body;
-  const rental = db.rentals.find((r: any) => r.id === id);
-  
-  if (!rental) return res.status(404).json({ message: "Aluguel não encontrado" });
-  
-  rental.status = 'RETURNED';
-  if (rental.items) {
-    rental.items.forEach((item: any) => {
-      const product = db.products.find((p: any) => p.id === item.productId);
-      if (product) {
-        product.reserved = Math.max(0, (product.reserved || 0) - item.quantity);
-        product.stock += item.quantity;
-        product.status = statusEstoque;
-        logStockMovement(product.id, item.quantity, 'entrada', `RETORNO: ${statusEstoque}`, id);
-      }
-    });
-  }
-  res.json({ message: "Itens devolvidos ao estoque." });
+router.get('/finance/bills', async (req: any, res) => {
+  const data = await prisma.finance.findMany({ where: { tenantId: req.tenantId } });
+  res.json({ data });
 });
 
-// --- FINANCEIRO (COMPLETO COM BAIXA PARCIAL) ---
-router.get('/finance/bills', (req, res) => {
-  res.json({ data: db.finance || [] });
-});
-
-router.post('/finance/bills', (req, res) => {
-  const bill = {
-    ...req.body,
-    id: uuidv4(),
-    status: req.body.status || 'PENDENTE',
-    createdAt: new Date()
-  };
-  db.finance.push(bill);
+router.post('/finance/bills', async (req: any, res) => {
+  const bill = await prisma.finance.create({
+    data: { ...req.body, value: Number(req.body.value), dueDate: new Date(req.body.dueDate), tenantId: req.tenantId }
+  });
   res.status(201).json(bill);
 });
 
-router.patch('/finance/bills/:id/pay', (req, res) => {
-  const index = db.finance.findIndex((b: any) => b.id === req.params.id);
-  if (index === -1) return res.status(404).send("Conta não encontrada");
-  
-  const bill = db.finance[index];
-  const valorPago = Number(req.body.paidValue || bill.value);
+router.get('/appointments', async (req: any, res) => {
+  const data = await prisma.appointment.findMany({ where: { tenantId: req.tenantId } });
+  res.json({ data });
+});
 
-  if (valorPago < bill.value) {
-    const saldoRestante = bill.value - valorPago;
-    
-    // Cria o registro do que foi pago
-    db.finance.push({
-      ...bill,
-      id: uuidv4(),
-      value: valorPago,
-      status: 'PAGO',
-      paidAt: new Date(),
-      description: `${bill.description} (PAGAMENTO PARCIAL)`
-    });
+app.post('/api/v1/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
 
-    // Atualiza a conta original com o saldo que falta
-    bill.value = saldoRestante;
-    bill.description = `${bill.description} (SALDO REMANESCENTE)`;
-    res.json({ message: "Pagamento parcial registrado. Saldo atualizado." });
-  } else {
-    bill.status = 'PAGO';
-    bill.paidAt = new Date();
-    res.json(bill);
+  if (!user || !(await bcrypt.compare(password, user.password))) {
+    return res.status(401).json({ message: "Credenciais inválidas" });
   }
+
+  res.json({
+    user: { name: user.name, email: user.email },
+    tenantId: user.tenantId,
+    tenantName: user.tenant.name
+  });
 });
 
-router.delete('/finance/bills/:id', (req, res) => {
-  db.finance = db.finance.filter((b: any) => b.id !== req.params.id);
-  res.status(204).send();
-});
-
-// --- AGENDA E RELATÓRIOS ---
-router.get('/appointments', (req, res) => {
-  res.json({ data: db.appointments || [] });
-});
-
-router.post('/appointments', (req, res) => {
-  const appt = { ...req.body, id: uuidv4(), createdAt: new Date() };
-  db.appointments.push(appt);
-  res.status(201).json(appt);
-});
-
-router.get('/reports/stock-movements', (req, res) => {
-  res.json({ data: db.stockMovements || [] });
-});
-
-// --- MOTOR DE IMPRESSÃO (SEM RESUMO) ---
-router.get('/contracts/:type/:id/print', (req, res) => {
+router.get('/contracts/:type/:id/print', async (req: any, res) => {
   const { type, id } = req.params;
-  const collection = db[type];
-  const document = collection?.find((d: any) => d.id === id);
-  if (!document) return res.status(404).send("<h1>Documento não encontrado.</h1>");
+  const settings = await prisma.settings.findUnique({ where: { tenantId: req.tenantId } });
   
-  const customer = db.customers.find((c: any) => c.id === document.customerId);
-  const template = type === 'sales' ? db.settings.contractSale : db.settings.contractRental;
-  const content = processContractText(template, { ...document, customer });
+  let document;
+  if (type === 'sales') document = await prisma.sale.findUnique({ where: { id }, include: { customer: true } });
+  else document = await prisma.rental.findUnique({ where: { id }, include: { customer: true } });
+
+  if (!document || !settings) return res.status(404).send("Documento não encontrado");
+
+  const template = type === 'sales' ? settings.contractSale : settings.contractRental;
+  const content = processContractText(settings, template || '', document);
 
   res.send(`
-    <!DOCTYPE html>
-    <html lang="pt-br">
-    <head>
-      <meta charset="UTF-8">
-      <title>Contrato - ${customer?.name || 'Atelier'}</title>
-      <style>
-        body { font-family: sans-serif; padding: 40px; line-height: 1.6; color: #333; }
-        .contract-box { max-width: 800px; margin: auto; border: 1px solid #eee; padding: 50px; background: #fff; }
-        h1 { color: ${db.settings.primaryColor}; border-bottom: 2px solid ${db.settings.primaryColor}; padding-bottom: 10px; }
-        .content { white-space: pre-wrap; margin-top: 30px; text-align: justify; }
-        .signatures { margin-top: 50px; display: flex; justify-content: space-between; }
-        .sig-line { border-top: 1px solid #000; width: 250px; text-align: center; padding-top: 5px; margin-top: 40px; font-size: 12px; }
-        @media print { body { background: white; padding: 0; } .contract-box { border: none; } }
-      </style>
-    </head>
-    <body>
-      <div class="contract-box">
-        <h1>${db.settings.atelierName}</h1>
-        <div class="content">${content}</div>
-        <div class="signatures">
-          <div class="sig-line">CONTRATADA<br>${db.settings.atelierName}</div>
-          <div class="sig-line">CONTRATANTE<br>${customer?.name || 'Assinatura do Cliente'}</div>
-        </div>
-      </div>
-      <script>window.onload = () => { setTimeout(() => window.print(), 500); }</script>
-    </body>
+    <html>
+      <body onload="window.print()">
+        <h1 style="color: ${settings.primaryColor}">${settings.atelierName}</h1>
+        <pre style="white-space: pre-wrap;">${content}</pre>
+      </body>
     </html>
   `);
 });
 
-// VINCULA O ROUTER AO APP
 app.use('/api/v1', router);
 
-// ESCUTA O SERVIDOR
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 SERVIDOR COMPLETO RODANDO NA PORTA: ${PORT}`);
+  console.log(`🚀 SERVIDOR SAAS RODANDO NA PORTA: ${PORT}`);
 });

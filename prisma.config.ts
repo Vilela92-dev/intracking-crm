@@ -1,6 +1,7 @@
-export default {
-  schema: './prisma/schema.prisma',
+import { defineConfig, env } from '@prisma/config';
+
+export default defineConfig({
   datasource: {
-    url: 'file:./dev.db'
-  }
-}
+    url: env('DATABASE_URL'),
+  },
+});

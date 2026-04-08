@@ -7,6 +7,8 @@ import {
   TrendingUp,
   TrendingDown
 } from 'lucide-react';
+// Importação da nossa API centralizada
+import api from '../services/api'; 
 
 export function Relatorios() {
   const [activeTab, setActiveTab] = useState('estoque');
@@ -20,18 +22,15 @@ export function Relatorios() {
       setLoading(true);
       setError(null);
       try {
-        // Buscando das rotas v1 configuradas no backend
+        // Substituído fetch(localhost) por api.get()
         const [resEstoque, resFinanceiro] = await Promise.all([
-          fetch('http://localhost:3000/api/v1/reports/stock-movements'),
-          fetch('http://localhost:3000/api/v1/finance/bills')
+          api.get('/reports/stock-movements'),
+          api.get('/finance/bills')
         ]);
 
-        if (!resEstoque.ok || !resFinanceiro.ok) {
-          throw new Error('Falha na comunicação com o servidor');
-        }
-
-        const estoqueData = await resEstoque.json();
-        const financeiroData = await resFinanceiro.json();
+        // No Axios, os dados chegam direto em .data
+        const estoqueData = resEstoque.data;
+        const financeiroData = resFinanceiro.data;
 
         // Ordenando por data mais recente primeiro
         const estoqueOrdenado = (estoqueData.data || []).sort((a, b) => new Date(b.data) - new Date(a.data));
@@ -41,7 +40,7 @@ export function Relatorios() {
         setMovimentacoesFinanceiras(financeiroOrdenado);
       } catch (err) {
         console.error("Erro na busca:", err);
-        setError("Erro ao carregar dados. Verifique o servidor.");
+        setError("Erro ao carregar dados. Verifique a conexão com o servidor.");
       } finally {
         setLoading(false);
       }

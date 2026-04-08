@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Package, Trash2, Loader2, Receipt, Calculator, Calendar, CheckCircle2, AlertCircle, X } from 'lucide-react';
+// Importamos a configuração da API que criamos no services
+import api from '../services/api'; 
 
 const Aluguel = () => {
   const [rentals, setRentals] = useState([]);
@@ -78,15 +80,17 @@ const Aluguel = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
+      // Usando a instância 'api' (Axios) em vez de fetch nativo com localhost
       const [prodRes, rentRes, custRes] = await Promise.all([
-        fetch('http://localhost:3000/api/v1/products/rentables'), 
-        fetch('http://localhost:3000/api/v1/rentals'),
-        fetch('http://localhost:3000/api/v1/crm/customers')
+        api.get('/products/rentables'), 
+        api.get('/rentals'),
+        api.get('/crm/customers')
       ]);
       
-      const prods = await prodRes.json();
-      const rents = await rentRes.json();
-      const custs = await custRes.json();
+      // Axios coloca os dados dentro da propriedade .data
+      const prods = prodRes.data;
+      const rents = rentRes.data;
+      const custs = custRes.data;
 
       const vestidosApenas = (prods.data || []).filter(p => 
         (p.tag?.toLowerCase() === 'vestido' || p.category === 'PEÇA_PRONTA') && 
@@ -107,19 +111,19 @@ const Aluguel = () => {
     if (!selectedRental) return;
     setIsSubmitting(true);
     try {
-      const response = await fetch(`http://localhost:3000/api/v1/rentals/${selectedRental.id}/return`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ statusEstoque: returnStatus })
+      // Usando api.patch
+      const response = await api.patch(`/rentals/${selectedRental.id}/return`, {
+        statusEstoque: returnStatus
       });
 
-      if (response.ok) {
+      if (response.status === 200 || response.status === 204) {
         setShowReturnModal(false);
         setSelectedRental(null);
         fetchData();
         alert("Devolução registrada e estoque atualizado!");
       }
     } catch (error) {
+      console.error(error);
       alert("Erro ao registrar devolução.");
     } finally {
       setIsSubmitting(false);
@@ -186,13 +190,10 @@ const Aluguel = () => {
     };
 
     try {
-      const response = await fetch('http://localhost:3000/api/v1/rentals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      // Usando api.post
+      const response = await api.post('/rentals', payload);
 
-      if (response.ok) {
+      if (response.status === 200 || response.status === 201) {
         alert("Contrato Fechado com Sucesso!");
         setFormData({ 
           productId: '', customerId: '', customerName: '', totalValue: 0, 
@@ -201,6 +202,9 @@ const Aluguel = () => {
         setListaParcelas([]);
         fetchData();
       }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao criar contrato.");
     } finally {
       setIsSubmitting(false);
     }
@@ -208,8 +212,12 @@ const Aluguel = () => {
 
   const handleDeleteRental = async (rentId) => {
     if (!window.confirm("Deseja estornar este aluguel?")) return;
-    await fetch(`http://localhost:3000/api/v1/rentals/${rentId}`, { method: 'DELETE' });
-    fetchData();
+    try {
+      await api.delete(`/rentals/${rentId}`);
+      fetchData();
+    } catch (err) {
+      alert("Erro ao estornar.");
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-screen text-purple-600"><Loader2 className="animate-spin" /></div>;
@@ -221,7 +229,7 @@ const Aluguel = () => {
         <p className="text-slate-500 font-medium italic">Gestão de Aluguéis & Finanças</p>
       </header>
 
-      {/* RADAR DE PENDÊNCIAS (OPÇÃO B) */}
+      {/* RADAR DE PENDÊNCIAS */}
       {pendencias.length > 0 && (
         <div className="mb-10 animate-in fade-in slide-in-from-top-4 duration-500">
           <h2 className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">

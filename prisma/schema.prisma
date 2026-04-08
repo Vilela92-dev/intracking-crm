@@ -6,12 +6,177 @@ datasource db {
   provider = "sqlite"
 }
 
+// ==========================================
+// CORE: SEGURANÇA E MULTI-EMPRESA
+// ==========================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String   // Nome do Ateliê
+  plan      String   @default("FREE")
+  createdAt DateTime @default(now())
+
+  // Relações (Tudo o que pertence a esta empresa)
+  users       User[]
+  customers   Customer[]
+  products    Product[]
+  suppliers   Supplier[]
+  quotes      Quote[]
+  sales       Sale[]
+  rentals     Rental[]
+  finance     Finance[]
+  appointments Appointment[]
+  settings    Settings?
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String?
   password  String
   role      String   @default("ADMIN")
+  
+  // Vínculo com a Empresa
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ==========================================
+// MÓDULOS DO SISTEMA
+// ==========================================
+
+model Customer {
+  id          String   @id @default(uuid())
+  name        String
+  cpf         String?
+  email       String?
+  phone       String?
+  status      String   @default("PROSPECÇÃO") // PROSPECÇÃO, ORÇAMENTO, CONTRATO FECHADO, CONCLUÍDO
+  
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  quotes      Quote[]
+  sales       Sale[]
+  rentals     Rental[]
+  createdAt   DateTime @default(now())
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  unit        String   @default("UNIDADE")
+  category    String   @default("INSUMO")
+  stock       Float    @default(0)
+  reserved    Float    @default(0)
+  price       Float    @default(0)
+  can_rent    Boolean  @default(false)
+  can_sell    Boolean  @default(false)
+  status      String   @default("DISPONIVEL")
+
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt   DateTime @default(now())
+}
+
+model Supplier {
+  id        String   @id @default(uuid())
+  name      String
+  cnpj      String?
+  contact   String?
+  
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt DateTime @default(now())
+}
+
+model Quote {
+  id            String   @id @default(uuid())
+  totalValue    Float
+  status        String   @default("PENDENTE")
+  isConverted   Boolean  @default(false)
+
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id])
+  
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt     DateTime @default(now())
+}
+
+model Sale {
+  id            String   @id @default(uuid())
+  totalValue    Float
+  status        String   @default("CONCLUIDO")
+
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id])
+  
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt     DateTime @default(now())
+}
+
+model Rental {
+  id            String   @id @default(uuid())
+  totalValue    Float
+  status        String   @default("ACTIVE")
+  dataRetirada  DateTime?
+  dataDevolucao DateTime?
+
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id])
+  
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt     DateTime @default(now())
+}
+
+model Finance {
+  id          String   @id @default(uuid())
+  type        String   // receita ou despesa
+  value       Float
+  status      String   // PAGO ou PENDENTE
+  description String
+  dueDate     DateTime
+  paidAt      DateTime?
+
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt   DateTime @default(now())
+}
+
+model Appointment {
+  id          String   @id @default(uuid())
+  title       String
+  date        DateTime
+  time        String
+  type        String
+
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  createdAt   DateTime @default(now())
+}
+
+model Settings {
+  id             String @id @default(uuid())
+  atelierName    String @default("Meu Ateliê")
+  cnpj           String?
+  address        String?
+  primaryColor   String @default("#4f46e5")
+  contractSale   String?
+  contractRental String?
+
+  tenantId       String @unique
+  tenant         Tenant @relation(fields: [tenantId], references: [id])
 }
