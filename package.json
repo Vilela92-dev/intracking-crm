@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node --loader ts-node/esm src/main.ts",
     "dev": "npx ts-node --esm src/main.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "heroku-postbuild": "prisma generate"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.14",
