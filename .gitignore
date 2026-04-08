@@ -1,1 +1,18 @@
-node_modules/ 
+# Dependências
+node_modules/
+
+# Variáveis de Ambiente (Segurança)
+.env
+.env.local
+.env.*.local
+
+# Builds e Cache
+dist/
+build/
+.next/
+.vercel
+*.log
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
