@@ -8,9 +8,11 @@ export function Login() {
   const { login, error: authError } = useAuth()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  
+  // Ajustado para os dados que você usou no teste do Heroku
   const [formData, setFormData] = useState({
-    email: 'teste@example.com',
-    password: '123456',
+    email: 'michelle@teste', 
+    password: '123',
   })
 
   const handleChange = (e) => {
@@ -25,10 +27,11 @@ export function Login() {
     setError('')
 
     try {
+      // O AuthContext cuidará da chamada ao axios e localStorage
       await login(formData.email, formData.password)
       navigate('/dashboard')
     } catch (err) {
-      setError(err.message || 'Erro ao fazer login')
+      setError(err.message || 'Erro ao conectar ao servidor')
     } finally {
       setLoading(false)
     }
@@ -36,53 +39,55 @@ export function Login() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-900 via-primary-800 to-primary-700 flex items-center justify-center p-4">
-      <div className="relative w-full max-w-md">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
+      <div className="relative w-full max-w-md animate-fadeIn">
+        {/* Card Principal */}
+        <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6 border border-white/20">
+          
           {/* Header */}
           <div className="text-center space-y-2">
             <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-2xl flex items-center justify-center">
+              <div className="w-16 h-16 bg-gradient-to-br from-primary-600 to-primary-800 rounded-2xl flex items-center justify-center shadow-lg">
                 <span className="text-3xl font-bold text-white">I</span>
               </div>
             </div>
-            <h1 className="text-3xl font-bold text-secondary-900">Intracking CRM</h1>
-            <p className="text-secondary-600">Gestão de Lojas de Vestidos</p>
+            <h1 className="text-3xl font-extrabold text-secondary-900 tracking-tight">Intracking CRM</h1>
+            <p className="text-secondary-500 font-medium">Gestão de Ateliê & Vestidos</p>
           </div>
 
-          {/* Error Message */}
+          {/* Mensagens de Erro */}
           {(error || authError) && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex gap-3">
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3 animate-slideIn">
               <AlertCircle className="text-red-600 flex-shrink-0" size={20} />
-              <p className="text-red-800 text-sm">{error || authError}</p>
+              <p className="text-red-800 text-sm font-medium">{error || authError}</p>
             </div>
           )}
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-secondary-700 mb-2">
-                Email
+              <label className="block text-sm font-semibold text-secondary-700 mb-1.5 ml-1">
+                E-mail
               </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-3 text-secondary-400" size={18} />
+              <div className="relative group">
+                <Mail className="absolute left-3 top-3.5 text-secondary-400 group-focus-within:text-primary-500 transition-colors" size={18} />
                 <input
-                  type="email"
+                  type="text"
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
                   placeholder="seu@email.com"
                   required
-                  className="w-full pl-10 pr-4 py-2 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 transition-colors"
+                  className="w-full pl-10 pr-4 py-3 bg-secondary-50 border border-secondary-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-secondary-700 mb-2">
+              <label className="block text-sm font-semibold text-secondary-700 mb-1.5 ml-1">
                 Senha
               </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 text-secondary-400" size={18} />
+              <div className="relative group">
+                <Lock className="absolute left-3 top-3.5 text-secondary-400 group-focus-within:text-primary-500 transition-colors" size={18} />
                 <input
                   type="password"
                   name="password"
@@ -90,7 +95,7 @@ export function Login() {
                   onChange={handleChange}
                   placeholder="••••••••"
                   required
-                  className="w-full pl-10 pr-4 py-2 border border-secondary-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 transition-colors"
+                  className="w-full pl-10 pr-4 py-3 bg-secondary-50 border border-secondary-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
                 />
               </div>
             </div>
@@ -98,29 +103,24 @@ export function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-primary-600 to-primary-700 text-white font-semibold py-2 rounded-lg hover:from-primary-700 hover:to-primary-800 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+              className="w-full bg-gradient-to-r from-primary-700 to-primary-900 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:opacity-95 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loading ? (
                 <>
-                  <Loader size={18} className="animate-spin" />
-                  Entrando...
+                  <Loader size={20} className="animate-spin" />
+                  Autenticando...
                 </>
               ) : (
-                'Entrar'
+                'Entrar no Sistema'
               )}
             </button>
           </form>
 
-          {/* Demo Credentials */}
-          <div className="bg-primary-50 border border-primary-200 rounded-lg p-4">
-            <p className="text-xs font-semibold text-primary-900 mb-2">📝 Credenciais de Teste:</p>
-            <p className="text-xs text-primary-700">Email: <code className="bg-white px-2 py-1 rounded">teste@example.com</code></p>
-            <p className="text-xs text-primary-700">Senha: <code className="bg-white px-2 py-1 rounded">123456</code></p>
-          </div>
-
           {/* Footer */}
-          <div className="text-center text-sm text-secondary-600">
-            <p>© 2024 Intracking CRM. Todos os direitos reservados.</p>
+          <div className="text-center pt-2">
+            <p className="text-xs text-secondary-400 font-medium">
+              © 2026 Intracking CRM. Acesso restrito.
+            </p>
           </div>
         </div>
       </div>

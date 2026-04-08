@@ -2,7 +2,8 @@
 export default {
   content: [
     "./index.html",
-    "./src/**/*.{js,jsx}",
+    "./src/**/*.{js,ts,jsx,tsx}",
+    "./frontend/src/**/*.{js,ts,jsx,tsx}", // Garante leitura se houver subpasta
   ],
   theme: {
     extend: {
@@ -17,7 +18,7 @@ export default {
           600: '#0284c7',
           700: '#0369a1',
           800: '#075985',
-          900: '#0c3d66',
+          900: '#0c3d66', // Cor profunda do seu sistema
         },
         secondary: {
           50: '#f8fafc',
@@ -34,9 +35,6 @@ export default {
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
-      },
-      spacing: {
-        '128': '32rem',
       },
       borderRadius: {
         '4xl': '2rem',

@@ -5,6 +5,7 @@ import { Layout } from './components/Layout'
 
 // Importação das Páginas
 import { Login } from './pages/Login'
+import { MasterSetup } from './pages/MasterSetup' // Nova página incluída
 import { Dashboard } from './pages/Dashboard'
 import CRM from './pages/CRM' 
 import { Vendas } from './pages/Vendas'
@@ -27,8 +28,11 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* Rota Pública */}
+          {/* Rotas Públicas */}
           <Route path="/login" element={<Login />} />
+          
+          {/* Rota Master Setup (Acesso Direto via URL) */}
+          <Route path="/master-setup" element={<MasterSetup />} />
 
           {/* Rotas Protegidas - Usando o padrão <Layout><Componente /></Layout> */}
           <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />

@@ -8,59 +8,73 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // 1. Verifica se já existe uma sessão ao carregar o app
   useEffect(() => {
     const token = localStorage.getItem('accessToken')
     const storedUser = localStorage.getItem('user')
+    
     if (token && storedUser) {
       try {
         setUser(JSON.parse(storedUser))
       } catch (err) {
+        // Se os dados estiverem corrompidos, limpa tudo
         localStorage.clear()
       }
     }
     setLoading(false)
   }, [])
 
+  // 2. Função de Login conectada ao Heroku
   const login = async (email, password) => {
     setError(null)
     try {
-      // 1. Chamada para a API (baseURL já tem /api/v1)
+      // O seu api.js deve ter a baseURL do Heroku
       const response = await api.post('/auth/login', { email, password })
       
-      // 2. Desestruturação conforme o seu server.js (data.data)
-      const { accessToken, user: userData } = response.data.data
+      // Ajustado para a estrutura real que vimos no seu log (status 200)
+      const { token, user: userData } = response.data
 
-      // 3. Salva no LocalStorage
-      localStorage.setItem('accessToken', accessToken)
+      // Salva os dados para manter a sessão ativa ao dar F5
+      localStorage.setItem('accessToken', token)
       localStorage.setItem('user', JSON.stringify(userData))
-      localStorage.setItem('companyId', userData.companyId || 'company-01')
+      
+      // Salva o ID do Ateliê (Tenant) para filtros futuros
+      if (userData.tenantId) {
+        localStorage.setItem('tenantId', userData.tenantId)
+      }
 
-      // 4. Atualiza o estado global
+      // Atualiza o estado global do React
       setUser(userData)
       return userData
+      
     } catch (err) {
-      console.error("Erro no login:", err)
-      const errorMessage = err.response?.data?.error || 'Email ou senha inválidos'
+      console.error("Erro detalhado no login:", err)
+      
+      // Captura a mensagem de erro vinda do servidor ou define uma padrão
+      const errorMessage = err.response?.data?.error || 'E-mail ou senha incorretos'
       setError(errorMessage)
       throw new Error(errorMessage)
     }
   }
 
+  // 3. Função de Registro (caso precise criar novos usuários)
   const register = async (name, email, password) => {
     setError(null)
     try {
       const response = await api.post('/auth/register', { name, email, password })
-      const userData = response.data.data
+      const userData = response.data.user
+      
       localStorage.setItem('user', JSON.stringify(userData))
       setUser(userData)
       return userData
     } catch (err) {
-      const errorMessage = err.response?.data?.error || 'Erro ao registrar'
+      const errorMessage = err.response?.data?.error || 'Erro ao realizar cadastro'
       setError(errorMessage)
       throw new Error(errorMessage)
     }
   }
 
+  // 4. Função de Logout (Sair)
   const logout = () => {
     localStorage.clear()
     setUser(null)
@@ -81,10 +95,11 @@ export function AuthProvider({ children }) {
   )
 }
 
+// Hook personalizado para usar o contexto em qualquer página
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) {
-    throw new Error('useAuth deve ser usado dentro de AuthProvider')
+    throw new Error('useAuth deve ser usado dentro de um AuthProvider')
   }
   return context
 }
