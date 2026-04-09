@@ -2,8 +2,6 @@ import { defineConfig } from '@prisma/config';
 import * as dotenv from 'dotenv';
 import { resolve } from 'path';
 
-// Força a leitura do arquivo .env informando o caminho absoluto
-dotenv.config({ path: resolve(process.cwd(), '.env') });
 
 export default defineConfig({
   earlyAccess: true,

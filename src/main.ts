@@ -11,9 +11,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import 'express-async-errors';
-import pkg from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
-const { PrismaClient } = pkg;
+const prisma = new PrismaClient();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'troque-isso-em-producao';
 
@@ -190,9 +190,9 @@ const updateOrAddProduct = async (tenantId: string, item: any) => {
 
 const processContractText = (settings: any, template: string, data: any) => {
   const map: any = {
-    '{{atelierName}}': settings.atelierName,
-    '{{cnpj_atelier}}': settings.cnpj || '',
-    '{{endereco_atelier}}': settings.address || '',
+    '{{ateliereName}}': settings.ateliereName,
+    '{{cnpj_ateliere}}': settings.cnpj || '',
+    '{{endereco_ateliere}}': settings.address || '',
     '{{nome}}': data.customer?.name || '________________',
     '{{cpf_cliente}}': data.customer?.cpf || '________________',
     '{{rg_cliente}}': data.customer?.rg || '________________',
@@ -221,7 +221,7 @@ const setupLimiter = rateLimit({
 
 app.post('/setup', setupLimiter, async (req, res) => {
   try {
-    const { atelierName, email, password, name } = req.body;
+    const { ateliereName, email, password, name } = req.body;
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ message: "Este e-mail já está cadastrado." });
