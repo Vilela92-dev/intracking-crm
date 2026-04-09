@@ -57,7 +57,6 @@ const authMiddleware = (req: any, res: any, next: any) => {
 // ==========================================
 // CONFIGURAÇÃO DE UPLOADS
 // ==========================================
-// Ajuste para subir dois níveis: sai de dist/src e vai para a raiz do projeto
 const uploadDir = path.join(__dirname, '..', '..', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -467,4 +466,5 @@ app.use((err: any, req: any, res: any, next: any) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 SERVIDOR SAAS RODANDO NA PORTA
+  console.log(`🚀 SERVIDOR SAAS RODANDO NA PORTA: ${PORT}`);
+});
