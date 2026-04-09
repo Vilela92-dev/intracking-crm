@@ -8,7 +8,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // 1. Verifica se já existe uma sessão ao carregar o app
+  // 1. Verifica se já existe uma sessão ao carregar o app (Persistência)
   useEffect(() => {
     const token = localStorage.getItem('accessToken')
     const storedUser = localStorage.getItem('user')
@@ -17,27 +17,26 @@ export function AuthProvider({ children }) {
       try {
         setUser(JSON.parse(storedUser))
       } catch (err) {
-        // Se os dados estiverem corrompidos, limpa tudo
+        // Se os dados estiverem corrompidos, limpa o armazenamento
         localStorage.clear()
       }
     }
     setLoading(false)
   }, [])
 
-  // 2. Função de Login conectada ao Heroku
+  // 2. Função de Login (Acesso ao CRM após o Setup)
   const login = async (email, password) => {
     setError(null)
     try {
       const response = await api.post('/auth/login', { email, password })
       
-      // ✅ CORRIGIDO: tenantId e tenantName vêm fora do objeto user no backend
+      // O backend retorna token, dados do usuário e informações do Tenant (Ateliê)
       const { token, user: userData, tenantId, tenantName } = response.data
 
-      // Salva os dados para manter a sessão ativa ao dar F5
+      // Salva no localStorage para manter a sessão ativa (persistência)
       localStorage.setItem('accessToken', token)
       localStorage.setItem('user', JSON.stringify(userData))
       
-      // Salva o ID e nome do Ateliê (Tenant)
       if (tenantId) {
         localStorage.setItem('tenantId', tenantId)
         localStorage.setItem('tenantName', tenantName)
@@ -49,32 +48,52 @@ export function AuthProvider({ children }) {
       
     } catch (err) {
       console.error("Erro detalhado no login:", err)
-      
-      // Captura a mensagem de erro vinda do servidor ou define uma padrão
       const errorMessage = err.response?.data?.message || err.response?.data?.error || 'E-mail ou senha incorretos'
       setError(errorMessage)
       throw new Error(errorMessage)
     }
   }
 
-  // 3. Função de Registro (caso precise criar novos usuários)
-  const register = async (name, email, password) => {
+  // 3. Função de Registro / Master Setup (Criação do Ateliê e Admin)
+  const register = async (name, email, password, ateliereName) => {
     setError(null)
     try {
-      const response = await api.post('/auth/register', { name, email, password })
-      const userData = response.data.user
+      /**
+       * IMPORTANTE: Para o Master Setup inicial do SaaS, batemos na rota /setup
+       * que criamos no main.ts, enviando o nome do Ateliê.
+       */
+      const response = await api.post('/setup', { 
+        name, 
+        email, 
+        password, 
+        ateliereName 
+      })
       
+      // O backend do setup retorna o usuário criado e o tenant (ateliê)
+      const userData = response.data.user
+      const tenantData = response.data.tenant
+      
+      // Salva os dados iniciais no localStorage
       localStorage.setItem('user', JSON.stringify(userData))
+      
+      if (tenantData) {
+        localStorage.setItem('tenantId', tenantData.id)
+        localStorage.setItem('tenantName', tenantData.name)
+      }
+
+      // Define o usuário no estado global
       setUser(userData)
-      return userData
+      return response.data
+      
     } catch (err) {
-      const errorMessage = err.response?.data?.error || 'Erro ao realizar cadastro'
+      console.error("Erro no Master Setup:", err)
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || 'Erro ao realizar configuração inicial do ambiente'
       setError(errorMessage)
       throw new Error(errorMessage)
     }
   }
 
-  // 4. Função de Logout (Sair)
+  // 4. Função de Logout (Limpa a sessão e desloga)
   const logout = () => {
     localStorage.clear()
     setUser(null)
@@ -95,7 +114,7 @@ export function AuthProvider({ children }) {
   )
 }
 
-// Hook personalizado para usar o contexto em qualquer página
+// Hook personalizado para facilitar o uso do contexto
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) {

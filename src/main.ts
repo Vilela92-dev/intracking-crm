@@ -12,12 +12,8 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import 'express-async-errors';
 import pkg from '@prisma/client';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
 const { PrismaClient } = pkg;
-const { PgAdapter } = require('@prisma/adapter-pg');
-const { Client } = require('pg');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'troque-isso-em-producao';
 
@@ -25,15 +21,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'troque-isso-em-producao';
 // CONFIGURAÇÃO PRISMA 7 + POSTGRESQL
 // ==========================================
 
-const client = new Client({
-  connectionString: process.env.DATABASE_URL,
-});
-
-await client.connect();
-
-const adapter = new PgAdapter(client);
-const prisma = new PrismaClient({ adapter });
-
+const prisma = new PrismaClient();
 
 const app = express();
 
