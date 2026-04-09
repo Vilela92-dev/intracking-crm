@@ -3,25 +3,19 @@
   "version": "1.0.0",
   "description": "Intracking CRM MVP",
   "type": "module",
-  "main": "src/main.ts",
+  "main": "dist/src/main.js",
   "engines": {
     "node": "20.x"
   },
   "scripts": {
-  "start": "node dist/src/main.js",
-  "dev": "npx ts-node --esm src/main.ts",
-  "build": "npx prisma generate && tsc",
-  "heroku-postbuild": "npx prisma generate && tsc"
-},
+    "start": "node dist/src/main.js",
+    "dev": "npx ts-node --esm src/main.ts",
+    "build": "tsc",
+    "heroku-postbuild": "tsc && npx prisma generate"
+  },
   "dependencies": {
-    "@nestjs/common": "^11.1.14",
-    "@nestjs/core": "^11.1.14",
-    "@nestjs/platform-express": "^11.1.14",
-    "@prisma/adapter-better-sqlite3": "^7.7.0",
     "@prisma/client": "^7.5.0",
-    "@prisma/config": "^7.4.2",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.8.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^4.22.1",
@@ -30,14 +24,10 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
-    "prisma": "^7.5.0",
-    "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
@@ -46,6 +36,9 @@
     "@types/uuid": "^9.0.7",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.9",
-    "tailwindcss": "^4.2.2"
+    "prisma": "^7.5.0",
+    "tailwindcss": "^4.2.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }
