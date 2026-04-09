@@ -20,6 +20,22 @@ app.use(cors());
 app.use(express.json());
 
 const ADMIN_PORT = 3001;
+const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
+
+// Middleware que protege todas as rotas do servidor admin
+const adminAuthMiddleware = (req: any, res: any, next: any) => {
+  if (!ADMIN_SECRET) {
+    console.warn('⚠️  ADMIN_SECRET não definido! Configure no .env');
+    return res.status(500).json({ error: 'Servidor admin não configurado corretamente.' });
+  }
+  const secret = req.headers['x-admin-secret'];
+  if (!secret || secret !== ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Acesso não autorizado.' });
+  }
+  next();
+};
+
+app.use(adminAuthMiddleware);
 
 // Rota para criar um novo Ateliê (Empresa + Admin + Config)
 app.post('/api/admin/onboarding', async (req, res) => {

@@ -1,31 +1,45 @@
 // @ts-nocheck
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
+import 'express-async-errors';
 import pkg from '@prisma/client';
-const { PrismaClient } = pkg;
-
 import { createRequire } from 'module';
+
 const require = createRequire(import.meta.url);
-const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
-const Database = require('better-sqlite3');
+const { PrismaClient } = pkg;
+const { PgAdapter } = require('@prisma/adapter-pg');
+const { Client } = require('pg');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'troque-isso-em-producao';
 
 // ==========================================
-// CONFIGURAÇÃO PRISMA (MOTOR DO SAAS)
+// CONFIGURAÇÃO PRISMA 7 + POSTGRESQL
 // ==========================================
 
-const db = new Database('./prisma/dev.db');
-const adapter = new PrismaBetterSqlite3({ url: 'file:./prisma/dev.db' });
+const client = new Client({
+  connectionString: process.env.DATABASE_URL,
+});
+
+await client.connect();
+
+const adapter = new PgAdapter(client);
 const prisma = new PrismaClient({ adapter });
 
 
 const app = express();
-app.use(cors());
+
+// Middlewares de Segurança e Base
+app.use(helmet({ contentSecurityPolicy: false })); // Protege contra vulnerabilidades web comuns
+app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
 app.use(express.json());
 
 const PORT: number = Number(process.env.PORT) || 3000;
@@ -36,15 +50,27 @@ const __dirname = path.dirname(__filename);
 // ==========================================
 // MIDDLEWARE DE ISOLAMENTO (TENANT)
 // ==========================================
-const tenantMiddleware = (req: any, res: any, next: any) => {
-  // O ID padrão 'tenant-esposa-id' é apenas um fallback para testes
-  const tenantId = req.headers['x-tenant-id'] || 'tenant-esposa-id';
-  req.tenantId = tenantId;
-  next();
+const authMiddleware = (req: any, res: any, next: any) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Token não fornecido.' });
+  }
+
+  try {
+    const payload: any = jwt.verify(token, JWT_SECRET);
+    req.tenantId = payload.tenantId;
+    req.userId = payload.userId;
+    req.userRole = payload.role;
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Token inválido ou expirado.' });
+  }
 };
 
 // ==========================================
-// CONFIGURAÇÃO DE UPLOADS (ESTRUTURA COMPLETA)
+// CONFIGURAÇÃO DE UPLOADS
 // ==========================================
 const uploadDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -77,9 +103,8 @@ const upload = multer({
 });
 
 // ==========================================
-// FUNÇÕES DE LOG E ESTOQUE (MIGRADAS PARA PRISMA)
+// FUNÇÕES DE LOG E ESTOQUE
 // ==========================================
-
 const logStockMovement = async (tenantId: string, productId: string, qty: number, type: string, destination: string, refId: string | number) => {
   console.log(`[MOVIMENTAÇÃO] Tenant: ${tenantId} | Produto: ${productId} | Qtd: ${qty} | Tipo: ${type} | Ref: ${refId}`);
 };
@@ -199,30 +224,23 @@ const processContractText = (settings: any, template: string, data: any) => {
 
 // ==========================================
 // ROTA DE SETUP (CADASTRO DE NOVAS EMPRESAS)
-// Esta rota precisa estar ANTES do router com tenantMiddleware
 // ==========================================
-app.post('/setup', async (req, res) => {
+const setupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { message: 'Muitas tentativas. Tente novamente em 15 minutos.' }
+});
+
+app.post('/setup', setupLimiter, async (req, res) => {
   try {
     const { atelierName, email, password, name } = req.body;
-
-    // Verificar se o e-mail já existe
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return res.status(400).json({ message: "Este e-mail já está cadastrado em outro ateliê." });
+      return res.status(400).json({ message: "Este e-mail já está cadastrado." });
     }
 
-    // 1. Criar a Empresa (Tenant)
-    const tenant = await prisma.tenant.create({
-      data: {
-        name: atelierName || "Novo Ateliê",
-        plan: "FREE"
-      }
-    });
-
-    // 2. Criptografar a senha
+    const tenant = await prisma.tenant.create({ data: { name: atelierName || "Novo Ateliê", plan: "FREE" } });
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 3. Criar o Usuário vinculado ao Tenant
     const user = await prisma.user.create({
       data: {
         email,
@@ -233,20 +251,12 @@ app.post('/setup', async (req, res) => {
       }
     });
 
-    // 4. Criar as Settings iniciais
     await prisma.settings.create({
-      data: {
-        atelierName: atelierName || "Meu Ateliê",
-        tenantId: tenant.id,
-        primaryColor: "#4f46e5"
-      }
+      data: { atelierName: atelierName || "Meu Ateliê", tenantId: tenant.id, primaryColor: "#4f46e5" }
     });
 
-    console.log(`✅ Ambiente criado com sucesso: ${atelierName} (${email})`);
-    res.status(201).json({ message: "Ambiente criado com sucesso!", tenantId: tenant.id });
-
+    res.status(201).json({ message: "Ambiente criado!", tenantId: tenant.id });
   } catch (error) {
-    console.error("❌ Erro ao processar setup:", error);
     res.status(500).json({ message: "Erro interno ao criar ambiente." });
   }
 });
@@ -255,7 +265,7 @@ app.post('/setup', async (req, res) => {
 // ROTAS DO SISTEMA (PREFIXO /API/V1)
 // ==========================================
 const router = express.Router();
-router.use(tenantMiddleware);
+router.use(authMiddleware);
 
 router.get('/settings', async (req: any, res) => {
   const settings = await prisma.settings.findUnique({ where: { tenantId: req.tenantId } });
@@ -290,15 +300,12 @@ router.post('/crm/customers', async (req: any, res) => {
 });
 
 router.put('/crm/customers/:id', async (req: any, res) => {
-  const updated = await prisma.customer.update({
-    where: { id: req.params.id },
-    data: req.body
-  });
+  const updated = await prisma.customer.update({ where: { id: req.params.id, tenantId: req.tenantId }, data: req.body });
   res.json(updated);
 });
 
 router.delete('/crm/customers/:id', async (req: any, res) => {
-  await prisma.customer.delete({ where: { id: req.params.id } });
+  await prisma.customer.delete({ where: { id: req.params.id, tenantId: req.tenantId } });
   res.status(204).send();
 });
 
@@ -308,22 +315,17 @@ router.get('/suppliers', async (req: any, res) => {
 });
 
 router.post('/suppliers', async (req: any, res) => {
-  const supplier = await prisma.supplier.create({
-    data: { ...req.body, tenantId: req.tenantId }
-  });
+  const supplier = await prisma.supplier.create({ data: { ...req.body, tenantId: req.tenantId } });
   res.status(201).json(supplier);
 });
 
 router.delete('/suppliers/:id', async (req: any, res) => {
-  await prisma.supplier.delete({ where: { id: req.params.id } });
+  await prisma.supplier.delete({ where: { id: req.params.id, tenantId: req.tenantId } });
   res.status(204).send();
 });
 
 router.get('/quotes', async (req: any, res) => {
-  const data = await prisma.quote.findMany({ 
-    where: { tenantId: req.tenantId },
-    include: { customer: true }
-  });
+  const data = await prisma.quote.findMany({ where: { tenantId: req.tenantId }, include: { customer: true } });
   res.json({ data });
 });
 
@@ -331,37 +333,21 @@ router.post('/quotes', async (req: any, res) => {
   const { customerId, items, laborCost, markup } = req.body;
   const materialCost = (items || []).reduce((sum: number, i: any) => sum + (Number(i.price || 0) * Number(i.quantity || 0)), 0);
   const total = (materialCost + Number(laborCost || 0)) * (1 + (Number(markup || 0) / 100));
-
-  const q = await prisma.quote.create({
-    data: { 
-      ...req.body, 
-      totalValue: total, 
-      status: 'PENDENTE', 
-      tenantId: req.tenantId 
-    }
-  });
+  const q = await prisma.quote.create({ data: { ...req.body, totalValue: total, tenantId: req.tenantId } });
   await updateCustomerStatus(req.tenantId, customerId, 'ORÇAMENTO');
   res.status(201).json(q);
 });
 
 router.put('/quotes/:id', async (req: any, res) => {
-  const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
+  const quote = await prisma.quote.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } });
   if (!quote) return res.status(404).json({ message: "Não encontrado" });
-  
-  const newStatus = req.body.status;
-  if (newStatus === 'APROVADO' && quote.status !== 'APROVADO') {
+  if (req.body.status === 'APROVADO' && quote.status !== 'APROVADO') {
     if (req.body.items) {
-      for (const i of req.body.items) {
-        await updateStock(req.tenantId, i.productId || i.id, i.quantity, 'reserve');
-      }
+      for (const i of req.body.items) await updateStock(req.tenantId, i.productId || i.id, i.quantity, 'reserve');
     }
     await updateCustomerStatus(req.tenantId, quote.customerId, 'CONTRATO FECHADO');
   }
-
-  const updated = await prisma.quote.update({
-    where: { id: req.params.id },
-    data: req.body
-  });
+  const updated = await prisma.quote.update({ where: { id: req.params.id }, data: req.body });
   res.json(updated);
 });
 
@@ -371,23 +357,10 @@ router.get('/sales', async (req: any, res) => {
 });
 
 router.post('/sales', async (req: any, res) => {
-  const { customerId, items, totalValue, valorEntrada, quoteId, parcelasAgendadas } = req.body;
-  
-  const sale = await prisma.sale.create({
-    data: { 
-      totalValue: Number(totalValue),
-      customerId,
-      tenantId: req.tenantId,
-      status: 'CONCLUIDO'
-    }
-  });
-
-  if (quoteId) {
-    await prisma.quote.update({ where: { id: quoteId }, data: { isConverted: true, status: 'APROVADO' } });
-  }
-
+  const { customerId, items, totalValue, valorEntrada, quoteId } = req.body;
+  const sale = await prisma.sale.create({ data: { totalValue: Number(totalValue), customerId, tenantId: req.tenantId, status: 'CONCLUIDO' } });
+  if (quoteId) await prisma.quote.update({ where: { id: quoteId }, data: { isConverted: true, status: 'APROVADO' } });
   await updateCustomerStatus(req.tenantId, customerId, 'CONTRATO FECHADO');
-
   if (items) {
     for (const i of items) {
       const pid = i.productId || i.id;
@@ -396,20 +369,9 @@ router.post('/sales', async (req: any, res) => {
       await logStockMovement(req.tenantId, pid, i.quantity, 'saida', `VENDA`, sale.id);
     }
   }
-
   if (Number(valorEntrada) > 0) {
-    await prisma.finance.create({
-      data: {
-        type: 'receita',
-        value: Number(valorEntrada),
-        status: 'PAGO',
-        description: `Entrada Venda`,
-        dueDate: new Date(),
-        tenantId: req.tenantId
-      }
-    });
+    await prisma.finance.create({ data: { type: 'receita', value: Number(valorEntrada), status: 'PAGO', description: `Entrada Venda`, dueDate: new Date(), tenantId: req.tenantId } });
   }
-
   res.status(201).json(sale);
 });
 
@@ -432,21 +394,10 @@ router.post('/products/produce', async (req: any, res) => {
       await logStockMovement(req.tenantId, id, c.quantityUsed, 'saida', `PRODUÇÃO: ${productName}`, 'OP-PROD');
     }
   }
-  if (items) {
-    for (const i of items) await updateOrAddProduct(req.tenantId, i);
-  }
+  if (items) for (const i of items) await updateOrAddProduct(req.tenantId, i);
   if (bills) {
     for (const bill of bills) {
-      await prisma.finance.create({
-        data: {
-          type: 'despesa',
-          value: Number(bill.value),
-          status: 'PENDENTE',
-          description: bill.description,
-          dueDate: new Date(bill.dueDate),
-          tenantId: req.tenantId
-        }
-      });
+      await prisma.finance.create({ data: { type: 'despesa', value: Number(bill.value), status: 'PENDENTE', description: bill.description, dueDate: new Date(bill.dueDate), tenantId: req.tenantId } });
     }
   }
   res.status(201).json({ message: "Produção processada" });
@@ -458,7 +409,7 @@ router.get('/rentals', async (req: any, res) => {
 });
 
 router.post('/rentals', async (req: any, res) => {
-  const { customerId, items, totalValue, valorEntrada, dataRetirada, dataDevolucao } = req.body;
+  const { customerId, items, totalValue, dataRetirada, dataDevolucao } = req.body;
   const rental = await prisma.rental.create({
     data: { 
       totalValue: Number(totalValue),
@@ -469,15 +420,8 @@ router.post('/rentals', async (req: any, res) => {
       status: 'ACTIVE'
     }
   });
-
   await updateCustomerStatus(req.tenantId, customerId, 'CONTRATO FECHADO');
-
-  if (items) {
-    for (const i of items) {
-      await updateStock(req.tenantId, i.productId, i.quantity, 'reserve');
-    }
-  }
-
+  if (items) for (const i of items) await updateStock(req.tenantId, i.productId, i.quantity, 'reserve');
   res.status(201).json(rental);
 });
 
@@ -487,9 +431,7 @@ router.get('/finance/bills', async (req: any, res) => {
 });
 
 router.post('/finance/bills', async (req: any, res) => {
-  const bill = await prisma.finance.create({
-    data: { ...req.body, value: Number(req.body.value), dueDate: new Date(req.body.dueDate), tenantId: req.tenantId }
-  });
+  const bill = await prisma.finance.create({ data: { ...req.body, value: Number(req.body.value), dueDate: new Date(req.body.dueDate), tenantId: req.tenantId } });
   res.status(201).json(bill);
 });
 
@@ -501,42 +443,31 @@ router.get('/appointments', async (req: any, res) => {
 app.post('/api/v1/auth/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
-
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ message: "Credenciais inválidas" });
-  }
-
-  res.json({
-    user: { name: user.name, email: user.email },
-    tenantId: user.tenantId,
-    tenantName: user.tenant.name
-  });
+  if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ message: "Credenciais inválidas" });
+  const token = jwt.sign({ userId: user.id, tenantId: user.tenantId, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ token, user: { name: user.name, email: user.email }, tenantId: user.tenantId, tenantName: user.tenant.name });
 });
+
+const escapeHtml = (str: string) => String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 
 router.get('/contracts/:type/:id/print', async (req: any, res) => {
   const { type, id } = req.params;
   const settings = await prisma.settings.findUnique({ where: { tenantId: req.tenantId } });
-  
   let document;
-  if (type === 'sales') document = await prisma.sale.findUnique({ where: { id }, include: { customer: true } });
-  else document = await prisma.rental.findUnique({ where: { id }, include: { customer: true } });
-
+  if (type === 'sales') document = await prisma.sale.findFirst({ where: { id, tenantId: req.tenantId }, include: { customer: true } });
+  else document = await prisma.rental.findFirst({ where: { id, tenantId: req.tenantId }, include: { customer: true } });
   if (!document || !settings) return res.status(404).send("Documento não encontrado");
-
   const template = type === 'sales' ? settings.contractSale : settings.contractRental;
   const content = processContractText(settings, template || '', document);
-
-  res.send(`
-    <html>
-      <body onload="window.print()">
-        <h1 style="color: ${settings.primaryColor}">${settings.atelierName}</h1>
-        <pre style="white-space: pre-wrap;">${content}</pre>
-      </body>
-    </html>
-  `);
+  res.send(`<html><body onload="window.print()"><h1 style="color: ${escapeHtml(settings.primaryColor)}">${escapeHtml(settings.atelierName)}</h1><pre style="white-space: pre-wrap;">${escapeHtml(content)}</pre></body></html>`);
 });
 
 app.use('/api/v1', router);
+
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('❌ Erro não tratado:', err);
+  res.status(500).json({ message: 'Erro interno do servidor.' });
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 SERVIDOR SAAS RODANDO NA PORTA: ${PORT}`);

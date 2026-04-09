@@ -28,19 +28,19 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     setError(null)
     try {
-      // O seu api.js deve ter a baseURL do Heroku
       const response = await api.post('/auth/login', { email, password })
       
-      // Ajustado para a estrutura real que vimos no seu log (status 200)
-      const { token, user: userData } = response.data
+      // ✅ CORRIGIDO: tenantId e tenantName vêm fora do objeto user no backend
+      const { token, user: userData, tenantId, tenantName } = response.data
 
       // Salva os dados para manter a sessão ativa ao dar F5
       localStorage.setItem('accessToken', token)
       localStorage.setItem('user', JSON.stringify(userData))
       
-      // Salva o ID do Ateliê (Tenant) para filtros futuros
-      if (userData.tenantId) {
-        localStorage.setItem('tenantId', userData.tenantId)
+      // Salva o ID e nome do Ateliê (Tenant)
+      if (tenantId) {
+        localStorage.setItem('tenantId', tenantId)
+        localStorage.setItem('tenantName', tenantName)
       }
 
       // Atualiza o estado global do React
@@ -51,7 +51,7 @@ export function AuthProvider({ children }) {
       console.error("Erro detalhado no login:", err)
       
       // Captura a mensagem de erro vinda do servidor ou define uma padrão
-      const errorMessage = err.response?.data?.error || 'E-mail ou senha incorretos'
+      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'E-mail ou senha incorretos'
       setError(errorMessage)
       throw new Error(errorMessage)
     }
