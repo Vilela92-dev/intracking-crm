@@ -13,20 +13,17 @@ import rateLimit from 'express-rate-limit';
 import 'express-async-errors';
 import { PrismaClient } from '@prisma/client';
 
+// ==========================================
+// CONFIGURAÇÃO PRISMA 7 + POSTGRESQL
+// ==========================================
 const prisma = new PrismaClient();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'troque-isso-em-producao';
 
-// ==========================================
-// CONFIGURAÇÃO PRISMA 7 + POSTGRESQL
-// ==========================================
-
-const prisma = new PrismaClient();
-
 const app = express();
 
 // Middlewares de Segurança e Base
-app.use(helmet({ contentSecurityPolicy: false })); // Protege contra vulnerabilidades web comuns
+app.use(helmet({ contentSecurityPolicy: false })); 
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
 app.use(express.json());
 
@@ -60,7 +57,8 @@ const authMiddleware = (req: any, res: any, next: any) => {
 // ==========================================
 // CONFIGURAÇÃO DE UPLOADS
 // ==========================================
-const uploadDir = path.join(__dirname, '..', 'uploads');
+// Ajuste para subir dois níveis: sai de dist/src e vai para a raiz do projeto
+const uploadDir = path.join(__dirname, '..', '..', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -149,7 +147,7 @@ const updateOrAddProduct = async (tenantId: string, item: any) => {
       OR: [
         { id: item.id || '' },
         { id: item.productId || '' },
-        { name: { equals: item.name.toUpperCase() } }
+        { name: { equals: item.name?.toUpperCase() || '' } }
       ]
     }
   });
@@ -190,7 +188,7 @@ const updateOrAddProduct = async (tenantId: string, item: any) => {
 
 const processContractText = (settings: any, template: string, data: any) => {
   const map: any = {
-    '{{ateliereName}}': settings.ateliereName,
+    '{{ateliereName}}': settings.ateliereName || settings.atelierName,
     '{{cnpj_ateliere}}': settings.cnpj || '',
     '{{endereco_ateliere}}': settings.address || '',
     '{{nome}}': data.customer?.name || '________________',
@@ -227,12 +225,18 @@ app.post('/setup', setupLimiter, async (req, res) => {
       return res.status(400).json({ message: "Este e-mail já está cadastrado." });
     }
 
-    const tenant = await prisma.tenant.create({ data: { name: atelierName || "Novo Ateliê", plan: "FREE" } });
+    const tenant = await prisma.tenant.create({ 
+      data: { 
+        name: ateliereName || "Novo Ateliê", 
+        plan: "FREE" 
+      } 
+    });
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
       data: {
         email,
-        name: name || atelierName,
+        name: name || ateliereName,
         password: hashedPassword,
         tenantId: tenant.id,
         role: "ADMIN"
@@ -240,11 +244,16 @@ app.post('/setup', setupLimiter, async (req, res) => {
     });
 
     await prisma.settings.create({
-      data: { atelierName: atelierName || "Meu Ateliê", tenantId: tenant.id, primaryColor: "#4f46e5" }
+      data: { 
+        atelierName: ateliereName || "Meu Ateliê", 
+        tenantId: tenant.id, 
+        primaryColor: "#4f46e5" 
+      }
     });
 
     res.status(201).json({ message: "Ambiente criado!", tenantId: tenant.id });
   } catch (error) {
+    console.error('Erro no Setup:', error);
     res.status(500).json({ message: "Erro interno ao criar ambiente." });
   }
 });
@@ -458,5 +467,4 @@ app.use((err: any, req: any, res: any, next: any) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 SERVIDOR SAAS RODANDO NA PORTA: ${PORT}`);
-});
+  console.log(`🚀 SERVIDOR SAAS RODANDO NA PORTA

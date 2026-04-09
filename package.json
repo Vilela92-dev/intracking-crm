@@ -8,11 +8,11 @@
     "node": "20.x"
   },
   "scripts": {
-    "start": "node dist/main.js",
-    "dev": "npx ts-node --esm src/main.ts",
-    "build": "tsc",
-    "heroku-postbuild": "npx prisma generate && tsc"
-  },
+  "start": "node dist/src/main.js",
+  "dev": "npx ts-node --esm src/main.ts",
+  "build": "npx prisma generate && tsc",
+  "heroku-postbuild": "npx prisma generate && tsc"
+},
   "dependencies": {
     "@nestjs/common": "^11.1.14",
     "@nestjs/core": "^11.1.14",
