@@ -258,6 +258,57 @@ app.post('/setup', setupLimiter, async (req, res) => {
 });
 
 // ==========================================
+// ROTA MASTER — CRIAÇÃO DE NOVOS ATELIÊS
+// Protegida pelo header x-admin-secret
+// ==========================================
+app.post('/api/admin/onboarding', async (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (!secret || secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Acesso não autorizado.' });
+  }
+
+  const { tenantName, adminName, email, password, primaryColor } = req.body;
+  try {
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Este e-mail já está cadastrado.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newTenant = await prisma.tenant.create({
+      data: {
+        name: tenantName,
+        plan: 'FREE',
+        settings: {
+          create: {
+            atelierName: tenantName,
+            primaryColor: primaryColor || '#4f46e5',
+          }
+        },
+        users: {
+          create: {
+            name: adminName,
+            email: email,
+            password: passwordHash,
+            role: 'ADMIN'
+          }
+        }
+      }
+    });
+
+    console.log(`✅ Novo ateliê criado: ${tenantName} (${email})`);
+    res.status(201).json({
+      message: 'Ateliê criado com sucesso!',
+      data: { tenantId: newTenant.id, email }
+    });
+
+  } catch (error) {
+    console.error('❌ Erro no onboarding:', error);
+    res.status(500).json({ error: 'Erro ao criar ambiente.' });
+  }
+});
+
+// ==========================================
 // ROTAS DO SISTEMA (PREFIXO /API/V1)
 // ==========================================
 const router = express.Router();

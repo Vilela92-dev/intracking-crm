@@ -11,8 +11,8 @@ export function Login() {
   
   // Ajustado para os dados que você usou no teste do Heroku
   const [formData, setFormData] = useState({
-    email: 'michelle@teste', 
-    password: '123',
+    email: '', 
+    password: '',
   })
 
   const handleChange = (e) => {

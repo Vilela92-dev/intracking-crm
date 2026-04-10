@@ -1,17 +1,16 @@
 import { useState } from 'react'
-import { useAuth } from '../contexts/AuthContext'
 import { Building, User, Mail, Lock, Loader, CheckCircle, AlertCircle } from 'lucide-react'
+import api from '../services/api'
 
 export function MasterSetup() {
-  const { register } = useAuth()
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
   const [formData, setFormData] = useState({
-    name: '',
+    tenantName: '',
+    adminName: '',
     email: '',
     password: '',
-    ateliereName: ''
   })
 
   const handleSubmit = async (e) => {
@@ -19,11 +18,15 @@ export function MasterSetup() {
     setLoading(true)
     setError('')
     try {
-      // Usando a função register que corrigimos no AuthContext
-      await register(formData.name, formData.email, formData.password, formData.ateliereName)
+      await api.post('/api/admin/onboarding', formData, {
+        baseURL: import.meta.env.VITE_API_URL?.replace('/api/v1', '') || 'http://localhost:3000',
+        headers: {
+          'x-admin-secret': import.meta.env.VITE_ADMIN_SECRET
+        }
+      })
       setSuccess(true)
     } catch (err) {
-      setError(err.message || 'Erro ao criar ambiente')
+      setError(err.response?.data?.error || 'Erro ao criar ambiente')
     } finally {
       setLoading(false)
     }
@@ -37,12 +40,12 @@ export function MasterSetup() {
             <CheckCircle className="text-green-600" size={40} />
           </div>
           <h2 className="text-2xl font-bold text-secondary-900">Ambiente Criado!</h2>
-          <p className="text-secondary-600 font-medium">O ateliê <strong>{formData.ateliereName}</strong> foi configurado e as credenciais master foram salvas.</p>
-          <button 
-            onClick={() => window.location.href = '/login'} 
+          <p className="text-secondary-600 font-medium">O ateliê <strong>{formData.tenantName}</strong> foi configurado com sucesso.</p>
+          <button
+            onClick={() => { setSuccess(false); setFormData({ tenantName: '', adminName: '', email: '', password: '' }) }}
             className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg"
           >
-            Ir para o Login
+            Criar Outro Ateliê
           </button>
         </div>
       </div>
@@ -74,8 +77,9 @@ export function MasterSetup() {
             <Building className="absolute left-3 top-3.5 text-secondary-400 group-focus-within:text-primary-500 transition-colors" size={18} />
             <input
               placeholder="Nome do Ateliê"
+              value={formData.tenantName}
               className="w-full pl-10 pr-4 py-3 bg-secondary-50 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all"
-              onChange={(e) => setFormData({...formData, ateliereName: e.target.value})}
+              onChange={(e) => setFormData({...formData, tenantName: e.target.value})}
               required
             />
           </div>
@@ -84,8 +88,9 @@ export function MasterSetup() {
             <User className="absolute left-3 top-3.5 text-secondary-400 group-focus-within:text-primary-500 transition-colors" size={18} />
             <input
               placeholder="Nome do Administrador"
+              value={formData.adminName}
               className="w-full pl-10 pr-4 py-3 bg-secondary-50 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all"
-              onChange={(e) => setFormData({...formData, name: e.target.value})}
+              onChange={(e) => setFormData({...formData, adminName: e.target.value})}
               required
             />
           </div>
@@ -94,7 +99,8 @@ export function MasterSetup() {
             <Mail className="absolute left-3 top-3.5 text-secondary-400 group-focus-within:text-primary-500 transition-colors" size={18} />
             <input
               type="email"
-              placeholder="E-mail Master"
+              placeholder="E-mail do Administrador"
+              value={formData.email}
               className="w-full pl-10 pr-4 py-3 bg-secondary-50 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all"
               onChange={(e) => setFormData({...formData, email: e.target.value})}
               required
@@ -106,6 +112,7 @@ export function MasterSetup() {
             <input
               type="password"
               placeholder="Senha de Acesso"
+              value={formData.password}
               className="w-full pl-10 pr-4 py-3 bg-secondary-50 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all"
               onChange={(e) => setFormData({...formData, password: e.target.value})}
               required
